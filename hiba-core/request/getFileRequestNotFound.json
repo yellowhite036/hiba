@@ -1,0 +1,6 @@
+{
+    "requestName": "getFileNotFound",
+    "serviceName": "getFile",
+    "fileName": "nonexistent.txt",
+    "receiveTargetPath": "./receiveFile/"
+}

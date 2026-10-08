@@ -1,0 +1,39 @@
+---
+- name: Cleanup HiBA Database Files
+  hosts: hiba_service
+  become: no
+  gather_facts: no
+  
+  tasks:
+    - name: Check if database files exist
+      find:
+        paths: "{{ remote_destination_dir }}"
+        patterns: "blockchain_manager.*"
+      register: db_files
+      
+    - name: Display found database files
+      debug:
+        msg: "Found database files: {{ item.path }}"
+      loop: "{{ db_files.files }}"
+      when: db_files.files | length > 0
+      
+    - name: Remove database files
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ db_files.files }}"
+      when: db_files.files | length > 0
+      
+    - name: Confirm database cleanup completion
+      debug:
+        msg: "Database cleanup completed on {{ inventory_hostname }}"
+        
+    - name: Verify files are removed
+      find:
+        paths: "{{ remote_destination_dir }}"
+        patterns: "blockchain_manager.*"
+      register: remaining_files
+      
+    - name: Report cleanup results
+      debug:
+        msg: "{% if remaining_files.files | length == 0 %}All database files successfully removed{% else %}Warning: {{ remaining_files.files | length }} files still remain{% endif %}"

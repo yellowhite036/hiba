@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN" shutdownHook="disable">
+  <Properties>
+    <Property name="LOG_LEVEL">${sys:LOG_LEVEL:-INFO}</Property>
+    <Property name="TPM_LOG_LEVEL">${sys:TPM_LOG_LEVEL:-OFF}</Property>
+    <Property name="LOG_DIR">./logs</Property>
+    <Property name="ROOT_LOGGER_NAME">hiba</Property>
+
+    <Property name="LOG_PATTERN_CONSOLE">
+      %d{yyyy-MM-dd HH:mm:ss.SSS} %highlight{%-5p}{FATAL=red blink, ERROR=red bold, WARN=yellow bold, INFO=white, DEBUG=cyan, TRACE=blue} [%X{requestId}] %style{%c:%L}{magenta} - %style{%m}{white}%n
+    </Property>
+    <Property name="LOG_PATTERN_CONSOLE_BRIGHT_GREEN">
+      %d{yyyy-MM-dd HH:mm:ss.SSS} %highlight{%-5p}{FATAL=red blink, ERROR=red bold, WARN=yellow bold, INFO=white, DEBUG=cyan, TRACE=blue} [%X{requestId}] %style{%c:%L}{magenta} - %style{%m}{bright_green}%n
+    </Property>
+
+    <Property name="LOG_PATTERN_CONSOLE_BRIGHT_RED">
+      %d{yyyy-MM-dd HH:mm:ss.SSS} %highlight{%-5p}{FATAL=red blink, ERROR=red bold, WARN=yellow bold, INFO=white, DEBUG=cyan, TRACE=blue} [%X{requestId}] %style{%c:%L}{magenta} - %style{%m}{bright_red}%n
+    </Property>
+
+    <Property name="LOG_PATTERN_CONSOLE_BRIGHT_BLUE">
+      %d{yyyy-MM-dd HH:mm:ss.SSS} %highlight{%-5p}{FATAL=red blink, ERROR=red bold, WARN=yellow bold, INFO=white, DEBUG=cyan, TRACE=blue} [%X{requestId}] %style{%c:%L}{magenta} - %style{%m}{bright_blue}%n
+    </Property>
+
+    <Property name="LOG_PATTERN_FILE">%d{yyyy-MM-dd HH:mm:ss.SSS} %-5p [%X{requestId}] %c{1}:%L - %m%n</Property>
+    <Property name="LOG_PATTERN_FILE_MS">%d{yyyy-MM-dd HH:mm:ss.SSS} %-5p [%X{requestId}] %c{1}:%L - %m%n</Property>
+  </Properties>
+
+  <Appenders>
+    <Console name="Console" target="SYSTEM_OUT">
+      <PatternLayout pattern="${LOG_PATTERN_CONSOLE}" disableAnsi="false"/>
+    </Console>
+
+    <Console name="ConsoleBrightGreen" target="SYSTEM_OUT">
+      <PatternLayout pattern="${LOG_PATTERN_CONSOLE_BRIGHT_GREEN}" disableAnsi="false"/>
+    </Console>
+
+    <Console name="ConsoleBrightRed" target="SYSTEM_OUT">
+      <PatternLayout pattern="${LOG_PATTERN_CONSOLE_BRIGHT_RED}" disableAnsi="false"/>
+    </Console>
+
+    <Console name="ConsoleBrightBlue" target="SYSTEM_OUT">
+      <PatternLayout pattern="${LOG_PATTERN_CONSOLE_BRIGHT_BLUE}" disableAnsi="false"/>
+    </Console>
+
+    <RollingFile name="ROOT_LOGGER_JSON" fileName="${LOG_DIR}/${ROOT_LOGGER_NAME}.log" filePattern="${LOG_DIR}/${ROOT_LOGGER_NAME}-%d{yyyy-MM-dd}-%i.log.gz">
+      <JsonLayout compact="true" eventEol="true" properties="true" includeStacktrace="true" locationInfo="true">
+        <KeyValuePair key="application" value="hiba"/>
+      </JsonLayout>
+      <Policies>
+        <TimeBasedTriggeringPolicy/>
+        <SizeBasedTriggeringPolicy size="10 MB"/>
+      </Policies>
+      <DefaultRolloverStrategy max="20"/>
+    </RollingFile>
+  </Appenders>
+
+  <Loggers>
+
+    <Root level="${LOG_LEVEL}">
+      <AppenderRef ref="ROOT_LOGGER_JSON"/>
+      <AppenderRef ref="Console"/>
+    </Root>
+
+
+    <Logger name="org.gslab.sdns" level="${LOG_LEVEL}" additivity="false">
+      <AppenderRef ref="ROOT_LOGGER_JSON"/>
+      <AppenderRef ref="Console"/>
+    </Logger>
+
+    <Logger name="org.gslab.sdnMobileControl" level="${LOG_LEVEL}" additivity="false">
+      <AppenderRef ref="ROOT_LOGGER_JSON"/>
+      <AppenderRef ref="Console"/>
+    </Logger>
+
+    <Logger name="org.gslab.service.mService.multicast" level="${LOG_LEVEL}" additivity="false">
+      <AppenderRef ref="ROOT_LOGGER_JSON"/>
+      <AppenderRef ref="Console"/>
+    </Logger>
+
+
+    <Logger name="org.gslab.service.RequestListener" level="${LOG_LEVEL}" additivity="false">
+      <AppenderRef ref="ROOT_LOGGER_JSON"/>
+      <AppenderRef ref="ConsoleBrightGreen"/>
+    </Logger>
+
+    <Logger name="org.gslab.App" level="${LOG_LEVEL}" additivity="false">
+      <AppenderRef ref="ROOT_LOGGER_JSON"/>
+      <AppenderRef ref="ConsoleBrightGreen"/>
+    </Logger>
+
+    <Logger name="org.gslab.distribution" level="${LOG_LEVEL}" additivity="false">
+      <AppenderRef ref="ROOT_LOGGER_JSON"/>
+      <AppenderRef ref="ConsoleBrightGreen"/>
+    </Logger>
+
+    <Logger name="org.gslab.handlers" level="${LOG_LEVEL}" additivity="false">
+      <AppenderRef ref="ROOT_LOGGER_JSON"/>
+      <AppenderRef ref="ConsoleBrightGreen"/>
+    </Logger>
+
+    <!-- TPM 簽名驗證日誌控制 - 預設 OFF 關閉，可透過 -DTPM_LOG_LEVEL=DEBUG 開啟 -->
+    <Logger name="org.gslab.handlers.MessageTPMSignHandler" level="${TPM_LOG_LEVEL}" additivity="false">
+      <AppenderRef ref="ROOT_LOGGER_JSON"/>
+      <AppenderRef ref="ConsoleBrightBlue"/>
+    </Logger>
+
+    <Logger name="org.gslab.handlers.MessageTPMVerifyHandler" level="${TPM_LOG_LEVEL}" additivity="false">
+      <AppenderRef ref="ROOT_LOGGER_JSON"/>
+      <AppenderRef ref="ConsoleBrightRed"/>
+    </Logger>
+
+    <Logger name="org.gslab.handlers.TimestampValidator" level="${TPM_LOG_LEVEL}" additivity="false">
+      <AppenderRef ref="ROOT_LOGGER_JSON"/>
+      <AppenderRef ref="ConsoleBrightRed"/>
+    </Logger>
+
+    <Logger name="org.gslab.handlers.NonceValidator" level="${TPM_LOG_LEVEL}" additivity="false">
+      <AppenderRef ref="ROOT_LOGGER_JSON"/>
+      <AppenderRef ref="ConsoleBrightRed"/>
+    </Logger>
+
+    <Logger name="org.gslab.tpm.TPMService" level="${TPM_LOG_LEVEL}" additivity="false">
+      <AppenderRef ref="ROOT_LOGGER_JSON"/>
+      <AppenderRef ref="Console"/>
+    </Logger>
+
+    <Logger name="org.gslab.tpm.PublicKeyCacheService" level="${TPM_LOG_LEVEL}" additivity="false">
+      <AppenderRef ref="ROOT_LOGGER_JSON"/>
+      <AppenderRef ref="ConsoleBrightRed"/>
+    </Logger>
+
+
+    <Logger name="org.gslab.service.mService.taker" level="${LOG_LEVEL}" additivity="false">
+      <AppenderRef ref="ROOT_LOGGER_JSON"/>
+      <AppenderRef ref="ConsoleBrightGreen"/>
+    </Logger>
+
+    <Logger name="org.gslab.service.mService.distributor" level="${LOG_LEVEL}" additivity="false">
+      <AppenderRef ref="ROOT_LOGGER_JSON"/>
+      <AppenderRef ref="ConsoleBrightGreen"/>
+    </Logger>
+
+    <Logger name="org.gslab.service.mService.executor.BlockchainFileIntegrityExecutor" level="${LOG_LEVEL}" additivity="false">
+      <AppenderRef ref="ROOT_LOGGER_JSON"/>
+      <AppenderRef ref="Console"/>
+    </Logger>
+
+    <Logger name="org.gslab.service.mService.executor" level="${LOG_LEVEL}" additivity="false">
+      <AppenderRef ref="ROOT_LOGGER_JSON"/>
+      <AppenderRef ref="ConsoleBrightGreen"/>
+    </Logger>
+
+    <Logger name="org.gslab.task" level="${LOG_LEVEL}" additivity="false">
+      <AppenderRef ref="ROOT_LOGGER_JSON"/>
+      <AppenderRef ref="ConsoleBrightGreen"/>
+    </Logger>
+
+    <Logger name="org.gslab.logging" level="${LOG_LEVEL}" additivity="false">
+      <AppenderRef ref="ROOT_LOGGER_JSON"/>
+      <AppenderRef ref="ConsoleBrightGreen"/>
+    </Logger>
+
+  </Loggers>
+
+</Configuration>

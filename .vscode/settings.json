@@ -1,0 +1,4 @@
+{
+    "java.configuration.updateBuildConfiguration": "automatic",
+    "ansible.python.interpreterPath": "/bin/python3"
+}

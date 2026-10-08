@@ -1,0 +1,50 @@
+- name: Stop the HiBA Service (Simple with Wait)
+  hosts: hiba_service
+  become: no
+  order: reverse_inventory
+  tasks:
+    - name: 1. Check if the service PID file exists
+      ansible.builtin.stat:
+        path: "{{ pid_path }}"
+      register: pid_file
+
+    - name: 2. Read the PID from the file if it exists
+      ansible.builtin.slurp:
+        src: "{{ pid_path }}"
+      when: pid_file.stat.exists
+      register: old_pid
+
+    - name: 3. Send SIGTERM for graceful shutdown
+      ansible.builtin.command:
+        cmd: "kill -15 {{ old_pid['content'] | b64decode | trim }}"
+      when: pid_file.stat.exists
+      ignore_errors: yes
+      register: stop_result
+
+    - name: 4. Wait for process to stop gracefully (30 seconds)
+      ansible.builtin.wait_for:
+        path: "/proc/{{ old_pid['content'] | b64decode | trim }}/status"
+        state: absent
+        timeout: 30
+      when: pid_file.stat.exists
+      ignore_errors: yes
+      register: graceful_stop
+
+    - name: 5. Force kill if still running
+      ansible.builtin.command:
+        cmd: "kill -9 {{ old_pid['content'] | b64decode | trim }}"
+      when:
+        - pid_file.stat.exists
+        - graceful_stop.failed is defined and graceful_stop.failed
+      ignore_errors: yes
+
+    - name: 6. Remove the PID file
+      ansible.builtin.file:
+        path: "{{ pid_path }}"
+        state: absent
+      when: pid_file.stat.exists
+
+    - name: 7. Display shutdown status
+      ansible.builtin.debug:
+        msg: "{{ 'Graceful shutdown successful' if graceful_stop.failed is not defined or not graceful_stop.failed else 'Required force kill' }}"
+      when: pid_file.stat.exists

@@ -1,0 +1,60 @@
+# --- PLAY 1: 全部停止 (反向順序 - node9先關閉) ---
+- name: 1. Stop All HiBA Services (Reverse Order - node9 first)
+  hosts: hiba_service
+  become: no
+  order: reverse_inventory
+
+  tasks:
+    - name: Check if the service PID file exists
+      ansible.builtin.stat:
+        path: "{{ pid_path }}"
+      register: pid_file
+
+    - name: Read the PID from the file if it exists
+      ansible.builtin.slurp:
+        src: "{{ pid_path }}"
+      when: pid_file.stat.exists
+      register: old_pid
+
+    - name: Stop the service process using the PID
+      ansible.builtin.command:
+        cmd: "kill {{ old_pid['content'] | b64decode | trim }}"
+      when: pid_file.stat.exists
+      ignore_errors: yes
+
+    - name: Remove the PID file after stopping
+      ansible.builtin.file:
+        path: "{{ pid_path }}"
+        state: absent
+      when: pid_file.stat.exists
+
+# --- PLAY 2: 啟動accounting-server ---
+- name: 2. Start Accounting Server
+  hosts: "hiba_service:&accounting-server"
+  become: no
+
+  tasks:
+    - name: Importing start tasks
+      ansible.builtin.import_tasks: start-hiba-service.yaml
+
+  post_tasks:
+    - name: Pause for 10 seconds after canary service starts
+      ansible.builtin.pause:
+        seconds: 10
+
+# --- PLAY 3: 分批啟動剩餘機器 (避免 Too many requests) ---
+- name: 3. Start Remaining HiBA Services in Batches
+  hosts: "hiba_service:!accounting-server" # 排除accounting-server
+  become: no
+  serial: 3  # 每次只啟動3個節點
+
+  tasks:
+    - name: Importing start tasks
+      ansible.builtin.import_tasks: start-hiba-service.yaml
+      
+#  post_tasks:
+#    - name: Pause between batches to avoid RPC rate limiting
+#      ansible.builtin.pause:
+#        seconds: 15
+#        prompt: "Waiting 15 seconds before starting next batch to avoid Sepolia RPC rate limiting..."
+#      when: not (play_hosts | last == inventory_hostname)

@@ -1,0 +1,117 @@
+{
+  "mService": {
+    "getModel": {
+      "type": "java",
+      "input": ["roadType", "recognitionCategory"],
+      "resource": {
+        "roadType": ["roadIntersection"],
+        "recognitionCategory": [
+          ["111", "112", "113", "114", "115", "116", "117", "118"],
+          ["213", "214", "215", "216", "217", "218"],
+          ["311", "312", "313", "314", "315", "316", "317", "318"],
+          ["321", "322", "323", "324", "325", "326", "327", "328"],
+          ["411", "412", "414", "415"],
+          ["421", "422", "424", "425", "426", "427"],
+          ["980", "990"]
+        ]
+      },
+      "build": {
+        "Distributor": "getModelDistributor",
+        "Executor": "getModelExecutor",
+        "Taker": "resourceCheckTaker"
+      },
+      "method": {
+        "getModel": "./t437_901/model/t1437k901_2022_08_12_22_14_24-useHog-useRatio/",
+        "modelTree": "./t437_901/setting/437_901.json",
+        "nodeSample": "./t437_901/sample/",
+        "configuration": "./t437_901/setting/road.json",
+        "outputSample": "./t437_901/assets/trainImage/origin/"
+      }
+    },
+    "getFile": {
+      "type": "java",
+      "input": ["fileName"],
+      "resourcePath": "./files/",
+      "resource": {
+        "fileName": []
+      },
+      "build": {
+        "Distributor": "getFileDistributor",
+        "Executor": "getFileExecutor",
+        "Taker": "getFileTaker"
+      },
+      "method": {
+        "fileDirectory": "./files/",
+        "receiveDirectory": "./receiveFile/"
+      }
+    },
+    "BlockchainFileProtect": {
+      "type": "java",
+      "input": ["fileName"],
+      "resourcePath": "./files/",
+      "resource": {
+        "fileName": []
+      },
+      "build": {
+        "Distributor": "BlockchainFileProtectDistributor",
+        "Executor": "BlockchainFileProtectExecutor",
+        "Taker": "BlockchainFileProtectTaker"
+      },
+      "method": {
+        "fileDirectory": "./files/",
+        "receiveDirectory": "./receiveFile/"
+      },
+      "maxDistributeNodes": 0
+    },
+    "BlockchainFileIntegrity": {
+      "type": "java",
+      "input": ["fileName", "fileHash"],
+      "resourcePath": "./files/",
+      "resource": {
+        "fileName": []
+      },
+      "build": {
+        "Distributor": "BlockchainFileIntegrityDistributor",
+        "Executor": "BlockchainFileIntegrityExecutor",
+        "Taker": "BlockchainFileIntegrityTaker"
+      },
+      "method": {
+        "fileDirectory": "./files/"
+      },
+      "maxDistributeNodes": 0
+    },
+    "ntp": {
+      "type": "java",
+      "input": ["ntpStart"],
+      "resource": {},
+      "build": {
+        "Distributor": "NTPDistributor",
+        "Executor": "NTPExecutor",
+        "Taker": "NTPTaker"
+      },
+      "method": {}
+    },
+    "trainDeepModel": {
+      "type": "java",
+      "input": ["tree", "sampleDirectory"],
+      "resource": {},
+      "build": {
+        "Distributor": "trainDeepModelDistributor",
+        "Executor": "trainDeepModelExecutor",
+        "Taker": "trainDeepModelTaker"
+      },
+      "method": {}
+    },
+    "initDevice": {
+      "type": "java",
+      "input": ["initStart"],
+      "resource": {},
+      "build": {
+        "Distributor": "InitializeDeviceDistributor",
+        "Executor": "InitializeDeviceExecutor",
+        "Taker": "InitializeDeviceTaker"
+      },
+      "method": {}
+    }
+  }
+}

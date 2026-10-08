@@ -1,0 +1,11 @@
+- 在 env.json 增加 HiBANetwork.BlockchainFileProtect 旗標（預設 true）
+- 在 HibaNetworkConfig 新增 BlockchainFileProtect 欄位與 getter/setter（預設 true）
+- 在 SystemConfigurationLoader 解析 BlockchainFileProtect（缺省時為 true）
+- 在 HiBAInitial 載入 BlockchainFileProtect 旗標並提供全域存取
+- 在 BlockchainFileProtectTaker 依旗標判定是否可本地執行
+- 當本地不可執行時，確保請求可透過 Broker 轉發
+- 在 BlockchainFileProtectDistributor 設計轉發邏輯與任務分配策略
+- 確保 BlockchainFileProtectExecutor 只處理分配到的任務並回傳結果
+- 定義無可用執行節點時的錯誤回應與日誌行為
+- 確認旗標為 false 時不影響其他服務的本地執行
+- 補充設計文件：流程敘述與主要元件責任界定

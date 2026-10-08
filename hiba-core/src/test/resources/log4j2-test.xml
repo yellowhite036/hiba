@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Test-specific Log4j2 configuration
+  Provides clean, console-like output for better test readability
+-->
+<Configuration status="WARN" shutdownHook="disable">
+  <Properties>
+    <!-- Simple pattern: just the message content, similar to System.out.println -->
+    <Property name="LOG_PATTERN_SIMPLE">%m%n</Property>
+
+    <!-- Minimal pattern: level + message only -->
+    <Property name="LOG_PATTERN_MINIMAL">[%-5p] %m%n</Property>
+
+    <!-- Clean pattern: timestamp + level + message (no class/line info) -->
+    <Property name="LOG_PATTERN_CLEAN">%d{HH:mm:ss.SSS} %-5p %m%n</Property>
+  </Properties>
+
+  <Appenders>
+    <!-- Console appender with simple output (like System.out.println) -->
+    <Console name="TestConsole" target="SYSTEM_OUT">
+      <PatternLayout pattern="${LOG_PATTERN_SIMPLE}" disableAnsi="false"/>
+    </Console>
+
+    <!-- Console appender with minimal logging info -->
+    <Console name="TestConsoleMinimal" target="SYSTEM_OUT">
+      <PatternLayout pattern="${LOG_PATTERN_MINIMAL}" disableAnsi="false"/>
+    </Console>
+
+    <!-- Console appender with clean timestamp -->
+    <Console name="TestConsoleClean" target="SYSTEM_OUT">
+      <PatternLayout pattern="${LOG_PATTERN_CLEAN}" disableAnsi="false"/>
+    </Console>
+  </Appenders>
+
+  <Loggers>
+    <!-- Root logger: set to WARN to reduce noise from libraries -->
+    <Root level="WARN">
+      <AppenderRef ref="TestConsoleMinimal"/>
+    </Root>
+
+    <!-- TPM test classes: use simple output for clean test logs -->
+    <Logger name="org.gslab.tpm" level="INFO" additivity="false">
+      <AppenderRef ref="TestConsole"/>
+    </Logger>
+
+    <!-- Handlers (validators): use simple output -->
+    <Logger name="org.gslab.handlers" level="INFO" additivity="false">
+      <AppenderRef ref="TestConsole"/>
+    </Logger>
+
+    <!-- Suppress noisy libraries -->
+    <Logger name="io.netty" level="WARN" additivity="false">
+      <AppenderRef ref="TestConsoleMinimal"/>
+    </Logger>
+
+    <Logger name="org.web3j" level="WARN" additivity="false">
+      <AppenderRef ref="TestConsoleMinimal"/>
+    </Logger>
+
+    <Logger name="com.github.benmanes.caffeine" level="WARN" additivity="false">
+      <AppenderRef ref="TestConsoleMinimal"/>
+    </Logger>
+  </Loggers>
+
+</Configuration>

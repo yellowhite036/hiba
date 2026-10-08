@@ -1,0 +1,23 @@
+# --- PLAY 1: 部署到accounting-server ---
+- name: 1. Deploy and Run on Accounting Server
+  hosts: "hiba_service:&accounting-server" # 優先執行accounting-server
+  become: no
+
+  tasks:
+    - name: Importing rolling update tasks
+      ansible.builtin.import_tasks: rolling-update-tasks.yaml
+
+  post_tasks:
+    - name: Pause for 10 seconds after canary deployment
+      ansible.builtin.pause:
+        seconds: 10
+
+# --- PLAY 2: 滾動部署剩餘的機器 ---
+- name: 2. Deploy and Run on Remaining Nodes
+  hosts: "hiba_service:!accounting-server" # 排除accounting-server
+  become: no
+  serial: 3  # 一台一台地更新，更安全
+
+  tasks:
+    - name: Importing rolling update tasks
+      ansible.builtin.import_tasks: rolling-update-tasks.yaml

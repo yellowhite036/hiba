@@ -1,0 +1,50 @@
+# --- 任務一：停止正在執行的舊版程式 ---
+- name: Check if the service is running by checking for pid file
+  ansible.builtin.stat:
+    path: "{{ pid_path }}"
+  register: pid_file
+
+- name: Read the PID from the pid file
+  ansible.builtin.slurp:
+    src: "{{ pid_path }}"
+  when: pid_file.stat.exists
+  register: old_pid
+
+- name: Stop the old service process
+  ansible.builtin.command:
+    cmd: "kill {{ old_pid['content'] | b64decode | trim }}"
+  when: pid_file.stat.exists
+  ignore_errors: yes
+
+# --- 任務二：部署新的應用程式檔案 ---
+- name: Ensure destination directory exists
+  ansible.builtin.file:
+    path: "{{ remote_destination_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Copy and overwrite service files
+  ansible.builtin.copy:
+    src: "{{ local_source_dir }}"
+    dest: "{{ remote_destination_dir }}"
+    directory_mode: "0755"
+    mode: "0744"
+
+# --- 任務三：啟動新的 Java 程式 ---
+- name: Ensure log directory exists
+  ansible.builtin.file:
+    path: "{{ remote_destination_dir }}/logs"
+    state: directory
+    mode: '0755'
+
+- name: Start the new HiBA service in the background
+  ansible.builtin.shell:
+    chdir: "{{ remote_destination_dir }}"
+    cmd: |
+      nohup /usr/jvm/jdk-21.0.2/bin/java \
+        -DLOG_LEVEL={{ log_level }} \
+        -DTPM_LOG_LEVEL={{ tpm_log_level }} \
+        -jar {{ jar_name }} \
+        > {{ startup_log_path }} 2>&1 & \
+      echo $! > {{ pid_path }}
+  changed_when: false

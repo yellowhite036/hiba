@@ -1,0 +1,90 @@
+# --- PLAY 1: 全部停止 ---
+- name: 1. Stop All HiBA Services
+  hosts: hiba_service
+  become: no
+
+  tasks:
+    - name: Check if the service PID file exists
+      ansible.builtin.stat:
+        path: "{{ pid_path }}"
+      register: pid_file
+
+    - name: Read the PID from the file if it exists
+      ansible.builtin.slurp:
+        src: "{{ pid_path }}"
+      when: pid_file.stat.exists
+      register: old_pid
+
+    - name: Stop the service process using the PID
+      ansible.builtin.command:
+        cmd: "kill {{ old_pid['content'] | b64decode | trim }}"
+      when: pid_file.stat.exists
+      ignore_errors: yes
+
+    - name: Remove the PID file after stopping
+      ansible.builtin.file:
+        path: "{{ pid_path }}"
+        state: absent
+      when: pid_file.stat.exists
+
+# --- PLAY 2: 啟動accounting-server ---
+- name: 2. Start Accounting Server First
+  hosts: "hiba_service:&accounting-server"
+  become: no
+
+  tasks:
+    - name: Importing start tasks
+      ansible.builtin.import_tasks: start-hiba-service.yaml
+
+  post_tasks:
+    - name: Pause for 15 seconds after accounting server starts
+      ansible.builtin.pause:
+        seconds: 15
+        prompt: "Accounting server started. Waiting 15 seconds before starting other nodes..."
+
+# --- PLAY 3: 分批啟動第一組節點 (node1, node2) ---
+- name: 3. Start Batch 1 - Nodes 1-2
+  hosts: node1:node2
+  become: no
+
+  tasks:
+    - name: Importing start tasks for batch 1
+      ansible.builtin.import_tasks: start-hiba-service.yaml
+
+  post_tasks:
+    - name: Pause after batch 1
+      ansible.builtin.pause:
+        seconds: 20
+        prompt: "Batch 1 (node1, node2) started. Waiting 20 seconds to avoid Sepolia RPC rate limiting..."
+      run_once: true
+
+# --- PLAY 4: 分批啟動第二組節點 (node3, node4, node5, node6) ---
+- name: 4. Start Batch 2 - Nodes 3-6
+  hosts: node3:node4:node5:node6
+  become: no
+
+  tasks:
+    - name: Importing start tasks for batch 2
+      ansible.builtin.import_tasks: start-hiba-service.yaml
+
+  post_tasks:
+    - name: Pause after batch 2
+      ansible.builtin.pause:
+        seconds: 20
+        prompt: "Batch 2 (node3, node4, node5, node6) started. Waiting 20 seconds to avoid Sepolia RPC rate limiting..."
+      run_once: true
+
+# --- PLAY 5: 分批啟動第三組節點 (node7, node8, node9) ---
+- name: 5. Start Batch 3 - Nodes 7-9
+  hosts: node7:node8:node9
+  become: no
+
+  tasks:
+    - name: Importing start tasks for batch 3
+      ansible.builtin.import_tasks: start-hiba-service.yaml
+
+  post_tasks:
+    - name: Rolling restart completed
+      ansible.builtin.debug:
+        msg: "All HiBA services have been restarted in batches to avoid Sepolia RPC rate limiting"
+      run_once: true

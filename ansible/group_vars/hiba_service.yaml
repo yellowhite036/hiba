@@ -1,0 +1,27 @@
+# 這個檔案是專屬於 `[hiba_service]` 群組的變數檔。
+# Ansible 會根據與群組同名的檔案名稱 (`hiba_service.yml`)，自動為該群組中的所有主機載入這些變數。
+#
+# 任何 Play 在處理 `hiba_service` 群組內的主機時，都可以直接使用這裡定義的變數。
+
+# Java 專案編譯後，存放所有檔案的 "來源資料夾"
+# 注意 src 路徑最後的斜線 '/'，這代表複製資料夾的 "內容"
+local_source_dir: "/home/user/hiba/output/"
+# 目標資料夾
+remote_destination_dir: "/home/user/HiBA"
+jar_name: "hiba-core-0.0.1.jar"
+
+# 定義遠端 PID 檔案的路徑
+pid_path: "{{ remote_destination_dir }}/hiba.pid"
+
+# 定義log的輸出等級: DEBUG, INFO
+log_level: "INFO"
+#log_level: "DEBUG"
+
+# 定義TPM log的輸出等級: DEBUG, INFO, WARN, OFF
+tpm_log_level: "OFF"
+#tpm_log_level: "DEBUG"
+
+startup_log_path: "{{ remote_destination_dir }}/logs/startup.log"
+
+sqlite_db_path: "{{ remote_destination_dir }}/blockchain_manager.db"
+sqlite_db_related_path: "{{ remote_destination_dir }}/blockchain_manager.*"

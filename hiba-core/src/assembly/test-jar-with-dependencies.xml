@@ -1,0 +1,47 @@
+<assembly xmlns="http://maven.apache.org/ASSEMBLY/2.2.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/ASSEMBLY/2.2.0 http://maven.apache.org/xsd/assembly-2.2.0.xsd">
+    <id>tests</id>
+    <formats>
+        <format>jar</format>
+    </formats>
+    <includeBaseDirectory>false</includeBaseDirectory>
+
+    <!-- Include main classes -->
+    <fileSets>
+        <fileSet>
+            <directory>${project.build.outputDirectory}</directory>
+            <outputDirectory>/</outputDirectory>
+        </fileSet>
+        <!-- Include test classes -->
+        <fileSet>
+            <directory>${project.build.testOutputDirectory}</directory>
+            <outputDirectory>/</outputDirectory>
+        </fileSet>
+        <!-- Include test resources -->
+        <fileSet>
+            <directory>${project.basedir}/src/test/resources</directory>
+            <outputDirectory>/</outputDirectory>
+        </fileSet>
+    </fileSets>
+
+    <!-- Include all dependencies (including test scope) -->
+    <dependencySets>
+        <dependencySet>
+            <outputDirectory>/</outputDirectory>
+            <unpack>true</unpack>
+            <scope>test</scope>
+            <excludes>
+                <exclude>*:*:*:sources</exclude>
+            </excludes>
+        </dependencySet>
+        <dependencySet>
+            <outputDirectory>/</outputDirectory>
+            <unpack>true</unpack>
+            <scope>runtime</scope>
+            <excludes>
+                <exclude>*:*:*:sources</exclude>
+            </excludes>
+        </dependencySet>
+    </dependencySets>
+</assembly>
