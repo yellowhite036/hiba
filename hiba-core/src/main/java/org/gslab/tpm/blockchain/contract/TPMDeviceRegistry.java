@@ -329,7 +329,7 @@ public class TPMDeviceRegistry extends Contract {
             DeviceRegisteredEventResponse response = new DeviceRegisteredEventResponse();
             response.log = log;
             response.ekFingerprintHash =
-                    (String) eventValues.getIndexedValues().get(0).getValue();
+                    (String) eventValues.getIndexedValues().getFirst().getValue();
             response.ekFingerprint =
                     (String) eventValues.getNonIndexedValues().get(0).getValue();
             response.timestamp =
@@ -351,7 +351,7 @@ public class TPMDeviceRegistry extends Contract {
             DeviceRevokedEventResponse response = new DeviceRevokedEventResponse();
             response.log = log;
             response.ekFingerprintHash =
-                    (String) eventValues.getIndexedValues().get(0).getValue();
+                    (String) eventValues.getIndexedValues().getFirst().getValue();
             response.ekFingerprint =
                     (String) eventValues.getNonIndexedValues().get(0).getValue();
             response.timestamp =
@@ -373,7 +373,7 @@ public class TPMDeviceRegistry extends Contract {
             DeviceReactivatedEventResponse response = new DeviceReactivatedEventResponse();
             response.log = log;
             response.ekFingerprintHash =
-                    (String) eventValues.getIndexedValues().get(0).getValue();
+                    (String) eventValues.getIndexedValues().getFirst().getValue();
             response.ekFingerprint =
                     (String) eventValues.getNonIndexedValues().get(0).getValue();
             response.timestamp =
@@ -391,7 +391,7 @@ public class TPMDeviceRegistry extends Contract {
             DeviceRegisteredEventResponse response = new DeviceRegisteredEventResponse();
             response.log = eventValues.getLog();
             response.ekFingerprintHash =
-                    (String) eventValues.getIndexedValues().get(0).getValue();
+                    (String) eventValues.getIndexedValues().getFirst().getValue();
             response.ekFingerprint =
                     (String) eventValues.getNonIndexedValues().get(0).getValue();
             response.timestamp =
@@ -408,7 +408,7 @@ public class TPMDeviceRegistry extends Contract {
             DeviceRevokedEventResponse response = new DeviceRevokedEventResponse();
             response.log = eventValues.getLog();
             response.ekFingerprintHash =
-                    (String) eventValues.getIndexedValues().get(0).getValue();
+                    (String) eventValues.getIndexedValues().getFirst().getValue();
             response.ekFingerprint =
                     (String) eventValues.getNonIndexedValues().get(0).getValue();
             response.timestamp =

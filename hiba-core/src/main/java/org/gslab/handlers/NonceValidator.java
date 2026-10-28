@@ -199,11 +199,11 @@ public class NonceValidator {
         log.info("=====================================================================");
         log.info("                     Nonce Validator Statistics                      ");
         log.info("=====================================================================");
-        log.info("  Recorded Nonce count: {:,}                                         ", usedNonces.estimatedSize());
-        log.info("  Total validations: {:,}                                            ", totalValidations.get());
-        log.info("  Replay attacks detected: {:,}                                      ", replayAttacksDetected.get());
+        log.info("  Recorded Nonce count: {}                                         ", usedNonces.estimatedSize());
+        log.info("  Total validations: {}                                            ", totalValidations.get());
+        log.info("  Replay attacks detected: {}                                      ", replayAttacksDetected.get());
         log.info(
-                "  Cache hit rate: {:.2f}%                                            ",
+                "  Cache hit rate: {}%                                            ",
                 usedNonces.stats().hitRate() * 100);
         log.info("=====================================================================");
     }

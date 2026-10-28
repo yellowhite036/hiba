@@ -18,7 +18,7 @@ import org.gslab.message_hiba.TaskFinishMessage;
 import org.gslab.message_hiba.TaskStartMessage;
 import org.gslab.model.RequestId;
 import org.gslab.model.TaskAssignment;
-import org.gslab.service.mService.multicast.MulticastController;
+import org.gslab.mService.multicast.MulticastController;
 import org.gslab.task.TaskDataAdapter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

@@ -2,7 +2,7 @@ package org.gslab;
 
 import java.io.File;
 import java.util.Map;
-import org.gslab.Tool.JsonFileTool;
+import org.gslab.util.JsonFileUtil;
 import org.gslab.errorHandling.FileCreateException;
 import org.slf4j.Logger;
 
@@ -38,7 +38,7 @@ public class Utils {
     public static float getCPUScore() {
         float score;
         File scoreFile = new File("./device/score.json");
-        Map<String, Object> map = JsonFileTool.ReadFile(scoreFile).toMap();
+        Map<String, Object> map = JsonFileUtil.ReadFile(scoreFile).toMap();
         logger.atInfo().addKeyValue("cpuScore", map.get("score")).log("CPU score: {}", map.get("score"));
         score = Float.parseFloat((String) map.get("score"));
         return score;

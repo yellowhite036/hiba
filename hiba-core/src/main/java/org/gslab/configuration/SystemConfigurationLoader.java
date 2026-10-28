@@ -2,7 +2,7 @@ package org.gslab.configuration;
 
 import java.io.File;
 import java.math.BigInteger;
-import org.gslab.Tool.JsonFileTool;
+import org.gslab.util.JsonFileUtil;
 import org.gslab.fileProtection.config.BlockchainFileProtectManagerConfig;
 import org.gslab.fileProtection.config.BlockchainServiceConfig;
 import org.gslab.fileProtection.config.DatabaseConfig;
@@ -28,7 +28,7 @@ public class SystemConfigurationLoader {
             throw new IllegalStateException("System configuration error occurred. env.json file could not be found");
         }
 
-        this.json = JsonFileTool.ReadFile(serviceFile);
+        this.json = JsonFileUtil.ReadFile(serviceFile);
 
         if (json == null) {
             throw new IllegalStateException("System configuration error occurred. env.json file is empty");

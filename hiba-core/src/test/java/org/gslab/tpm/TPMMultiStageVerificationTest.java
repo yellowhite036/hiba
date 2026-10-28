@@ -26,7 +26,7 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 import lombok.Builder;
 import lombok.Getter;
-import org.gslab.Tool.Util;
+import org.gslab.util.Util;
 import org.gslab.configuration.MessageVerificationConfig;
 import org.gslab.handlers.NonceValidator;
 import org.gslab.handlers.TimestampValidator;

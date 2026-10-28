@@ -7,10 +7,10 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="dd39eaee-4638-4c3d-9990-d86540e6fc8f" name="Changes" comment="feat(getFile service): initialize resource path from configuration">
+    <list default="true" id="dd39eaee-4638-4c3d-9990-d86540e6fc8f" name="Changes" comment="1">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/hiba-core/src/main/java/org/gslab/distribution/DistributionThreadExecutor.java" beforeDir="false" afterPath="$PROJECT_DIR$/hiba-core/src/main/java/org/gslab/distribution/DistributionThreadExecutor.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/hiba-core/src/main/resources/log4j2.xml" beforeDir="false" afterPath="$PROJECT_DIR$/hiba-core/src/main/resources/log4j2.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/hiba-core/src/main/java/org/gslab/App.java" beforeDir="false" afterPath="$PROJECT_DIR$/hiba-core/src/main/java/org/gslab/App.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/hiba-core/src/main/java/org/gslab/distribution/DistributionThreadExecutor.java" beforeDir="false" afterPath="$PROJECT_DIR$/hiba-core/src/main/java/org/gslab/sdns/DistributionThreadExecutor.java" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -42,12 +42,12 @@
   <component name="GitRewordedCommitMessages">
     <option name="commitMessagesMapping">
       <RewordedCommitMessageMapping>
-        <option name="originalMessage" value="feat(ansible, logger): disable async logger and modify ansible story book" />
-        <option name="rewordedMessage" value="1&#10;&#10;&#10;feat(ansible, logger): disable async logger and modify ansible story book" />
+        <option name="originalMessage" value="refactor: remove unused java class, scripts, docs" />
+        <option name="rewordedMessage" value="refactor: remove unused java class, scripts, docs" />
       </RewordedCommitMessageMapping>
     </option>
     <option name="currentCommit" value="1" />
-    <option name="onto" value="b766ed959b83660bb5f3f1d32102a0cb14befad3" />
+    <option name="onto" value="c6770180e7c8ef3272fed08d2cd1c58f7aba61dc" />
   </component>
   <component name="GitToolBoxStore">
     <option name="recentBranches">
@@ -122,7 +122,7 @@
     &quot;SHELLCHECK.PATH&quot;: &quot;/home/user/.local/share/JetBrains/IntelliJIdea2025.1/Shell Script/shellcheck&quot;,
     &quot;Shell Script.deploy_run.executor&quot;: &quot;Run&quot;,
     &quot;Shell Script.restart.executor&quot;: &quot;Run&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;user/mark/blockchain&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;dev&quot;,
     &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
     &quot;junie.onboarding.icon.badge.shown&quot;: &quot;true&quot;,
     &quot;last_opened_file_path&quot;: &quot;/home/user/Desktop/hiba-before-unified-response&quot;,
@@ -154,9 +154,9 @@
       <window_info id="Merge Requests" />
       <window_info id="Backup and Sync History" />
       <window_info id="Commit_Guest" show_stripe_button="false" />
-      <window_info active="true" content_ui="combo" id="Project" order="0" visible="true" weight="0.20078126" />
+      <window_info active="true" content_ui="combo" id="Project" order="0" visible="true" weight="0.18776041" />
       <window_info id="Commit" order="1" weight="0.21171875" />
-      <window_info id="Structure" order="2" side_tool="true" weight="0.20130208" />
+      <window_info id="Structure" order="2" side_tool="true" weight="0.18776041" />
       <window_info id="Bookmarks" order="3" side_tool="true" weight="0.16728134" />
       <window_info id="Learn" order="4" show_stripe_button="false" weight="0.32994792" />
       <window_info id="Pull Requests" order="5" weight="0.32994792" />
@@ -168,7 +168,7 @@
       <window_info anchor="bottom" id="Version Control" order="0" weight="0.5053295" />
       <window_info anchor="bottom" id="Problems" order="1" />
       <window_info anchor="bottom" id="Problems View" order="2" weight="0.49273255" />
-      <window_info anchor="bottom" id="Terminal" order="3" weight="0.44428295" />
+      <window_info active="true" anchor="bottom" id="Terminal" order="3" visible="true" weight="0.44428295" />
       <window_info anchor="bottom" id="Services" order="4" weight="0.38032946" />
       <window_info anchor="bottom" id="Run" order="5" weight="0.32994187" />
       <window_info anchor="bottom" id="Find" order="6" weight="0.33091086" />
@@ -176,7 +176,7 @@
       <window_info anchor="bottom" id="TODO" order="8" weight="0.32994187" />
       <window_info anchor="bottom" id="Profiler" order="9" show_stripe_button="false" weight="0.32994187" />
       <window_info anchor="bottom" id="Build" order="10" weight="0.32994187" />
-      <window_info anchor="bottom" id="Statistic" order="11" weight="0.32994187" />
+      <window_info anchor="bottom" id="Statistic" order="11" weight="0.48304263" />
       <window_info anchor="right" id="String Manipulation" show_stripe_button="false" />
       <window_info anchor="right" id="Endpoints" />
       <window_info anchor="right" id="Developer Tools" side_tool="true" />
@@ -440,6 +440,7 @@
       <workItem from="1762158911742" duration="13220000" />
       <workItem from="1762764228070" duration="18801000" />
       <workItem from="1764558135417" duration="23000" />
+      <workItem from="1770782264499" duration="3303000" />
     </task>
     <task id="LOCAL-00001" summary="refactor: fix typo">
       <option name="closed" value="true" />
@@ -649,7 +650,23 @@
       <option name="project" value="LOCAL" />
       <updated>1761532423680</updated>
     </task>
-    <option name="localTasksCounter" value="27" />
+    <task id="LOCAL-00027" summary="refactor: remove unused java class, scripts, docs">
+      <option name="closed" value="true" />
+      <created>1770784266236</created>
+      <option name="number" value="00027" />
+      <option name="presentableId" value="LOCAL-00027" />
+      <option name="project" value="LOCAL" />
+      <updated>1770784266236</updated>
+    </task>
+    <task id="LOCAL-00028" summary="1">
+      <option name="closed" value="true" />
+      <created>1770784754606</created>
+      <option name="number" value="00028" />
+      <option name="presentableId" value="LOCAL-00028" />
+      <option name="project" value="LOCAL" />
+      <updated>1770784754606</updated>
+    </task>
+    <option name="localTasksCounter" value="29" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -698,7 +715,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="refactor: code inspection, clean up code by removing unnecessary semicolons, simplifying return statements, make variable final, etc." />
     <MESSAGE value="refactor: code inspection, clean up code by removing unnecessary imports and simplifying conditional statements" />
     <MESSAGE value="feat: complete Phase3 and Phase4 blockchain integration for GetFile service" />
     <MESSAGE value="refactor: add log message for running shell command" />
@@ -720,17 +736,18 @@
     <MESSAGE value="feat(requestId): add requestId in log while node receiving file" />
     <MESSAGE value="feat(ansible): add a new script to run a command on all hosts or one host" />
     <MESSAGE value="feat(request listener): unify response format of http request" />
+    <MESSAGE value="feat(ansible, logger): disable async logger and modify ansible story book" />
+    <MESSAGE value="feat(ansible, logger): disable async logger and modify ansible story book" />
     <MESSAGE value="1" />
-    <MESSAGE value="feat(ansible, logger): disable async logger and modify ansible story book" />
-    <MESSAGE value="feat(ansible, logger): disable async logger and modify ansible story book" />
-    <option name="LAST_COMMIT_MESSAGE" value="feat(ansible, logger): disable async logger and modify ansible story book" />
+    <MESSAGE value="refactor: remove unused java class, scripts, docs" />
+    <option name="LAST_COMMIT_MESSAGE" value="refactor: remove unused java class, scripts, docs" />
     <option name="LAST_CHUNK_COMMIT_MESSAGE" value="refactor: fix typo" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
       <breakpoints>
         <line-breakpoint enabled="true" type="java-line">
-          <url>file://$PROJECT_DIR$/hiba-core/src/main/java/org/gslab/service/mService/distributor/getFileDistributor.java</url>
+          <url>file://$PROJECT_DIR$/hiba-core/src/main/java/org/gslab/mService/distributor/getFileDistributor.java</url>
           <line>34</line>
           <option name="timeStamp" value="1" />
         </line-breakpoint>

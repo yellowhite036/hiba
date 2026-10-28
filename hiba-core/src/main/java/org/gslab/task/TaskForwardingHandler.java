@@ -7,7 +7,7 @@ import org.gslab.Distributor;
 import org.gslab.model.RequestId;
 import org.gslab.sdns.HiBAInitial;
 import org.gslab.sdns.HiBANetwork;
-import org.gslab.service.mService.multicast.MulticastController;
+import org.gslab.mService.multicast.MulticastController;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

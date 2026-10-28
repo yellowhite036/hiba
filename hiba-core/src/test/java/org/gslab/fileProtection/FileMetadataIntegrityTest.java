@@ -782,8 +782,8 @@ class FileMetadataIntegrityTest {
             System.out.println("│ 攻擊方式: 修改檔案內容的第一個位元組");
             System.out.println("│ 修改欄位: 檔案內容 (file content)");
             System.out.println("├─────────────────────────────────────────────────────────────────────┤");
-            System.out.println("│ 原始值: " + org.gslab.Tool.Util.truncateFirstAndLast(originalBase64, 24));
-            System.out.println("│ 修改後: " + org.gslab.Tool.Util.truncateFirstAndLast(tamperedBase64, 24) + " [已修改]");
+            System.out.println("│ 原始值: " + org.gslab.util.Util.truncateFirstAndLast(originalBase64, 24));
+            System.out.println("│ 修改後: " + org.gslab.util.Util.truncateFirstAndLast(tamperedBase64, 24) + " [已修改]");
             System.out.println("└─────────────────────────────────────────────────────────────────────┘");
             System.out.println();
 

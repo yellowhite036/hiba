@@ -140,7 +140,7 @@
       <AppenderRef ref="ConsoleBrightGreen"/>
     </Logger>
 
-    <Logger name="org.gslab.service.mService.executor.BlockchainFileIntegrityExecutor" level="${LOG_LEVEL}" additivity="false">
+    <Logger name="org.gslab.mService.executor.BlockchainFileIntegrityExecutor" level="${LOG_LEVEL}" additivity="false">
       <AppenderRef ref="ROOT_LOGGER_JSON"/>
       <AppenderRef ref="Console"/>
     </Logger>

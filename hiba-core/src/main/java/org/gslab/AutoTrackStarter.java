@@ -9,8 +9,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import org.gslab.Tool.JsonFileTool;
-import org.gslab.Tool.ResourceCleanupManager;
+import org.gslab.util.JsonFileUtil;
+import org.gslab.util.ResourceCleanupManager;
 import org.gslab.configuration.HibaNetworkConfig;
 import org.gslab.configuration.HibaServiceConfig;
 import org.gslab.configuration.MobileNetworkConfig;
@@ -20,7 +20,7 @@ import org.gslab.errorHandling.FileCreateException;
 import org.gslab.sdns.HiBAHttpRequestServer;
 import org.gslab.sdns.HiBAInitial;
 import org.gslab.sdns.HiBANetwork;
-import org.gslab.service.mService.NTPServer;
+import org.gslab.mService.NTPServer;
 import org.json.JSONObject;
 import org.json.JSONTokener;
 import org.slf4j.Logger;
@@ -72,7 +72,7 @@ public class AutoTrackStarter {
         // load microService & system Service
         File serviceFile = new File("./service.json");
 
-        Map<String, Object> serviceTree = JsonFileTool.ReadFile(serviceFile).toMap();
+        Map<String, Object> serviceTree = JsonFileUtil.ReadFile(serviceFile).toMap();
         Map<String, Object> serviceMap = (Map<String, Object>) serviceTree.get("mService");
         Map<String, Object> inputRuleMap = new HashMap<>();
         Map<String, Object> resourceMap = new HashMap<>();
@@ -194,7 +194,7 @@ public class AutoTrackStarter {
      */
     private static Distributor createDistributorWithConfig(String distributorName, ServiceConfiguration config) {
         try {
-            Class<?> distributorClass = Class.forName("org.gslab.service.mService.distributor." + distributorName);
+            Class<?> distributorClass = Class.forName("org.gslab.mService.distributor." + distributorName);
 
             // Try constructor with ServiceConfiguration first
             try {
@@ -226,7 +226,7 @@ public class AutoTrackStarter {
      */
     private static Executor createExecutorWithConfig(String executorName, ServiceConfiguration config) {
         try {
-            Class<?> executorClass = Class.forName("org.gslab.service.mService.executor." + executorName);
+            Class<?> executorClass = Class.forName("org.gslab.mService.executor." + executorName);
 
             // Try constructor with ServiceConfiguration first
             try {
@@ -258,7 +258,7 @@ public class AutoTrackStarter {
      */
     private static Taker createTakerWithConfig(String takerName, ServiceConfiguration config) {
         try {
-            Class<?> takerClass = Class.forName("org.gslab.service.mService.taker." + takerName);
+            Class<?> takerClass = Class.forName("org.gslab.mService.taker." + takerName);
 
             // Try constructor with ServiceConfiguration first
             try {

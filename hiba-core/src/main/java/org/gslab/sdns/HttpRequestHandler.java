@@ -36,8 +36,8 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import org.gslab.App;
-import org.gslab.Tool.PathUtil;
-import org.gslab.Tool.StringTool;
+import org.gslab.util.PathUtil;
+import org.gslab.util.StringUtil;
 import org.gslab.context.RequestContext;
 import org.gslab.model.RequestId;
 import org.gslab.model.response.FileOperationResult;
@@ -219,7 +219,7 @@ public class HttpRequestHandler extends SimpleChannelInboundHandler<FullHttpRequ
             String jsonString = content.toString(CharsetUtil.UTF_8);
             logger.atInfo()
                     .addKeyValue("requestId", requestId)
-                    .addKeyValue("request", StringTool.removeNewlineAndSpace(jsonString))
+                    .addKeyValue("request", StringUtil.removeNewlineAndSpace(jsonString))
                     .log("Received HTTP request");
 
             // Parse JSON

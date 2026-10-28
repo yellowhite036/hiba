@@ -46,12 +46,12 @@ public class FileMetadataFactory {
                     Long.toString(fileSize),
                     HashUtil.getHashAlgorithm(),
                     Integer.toString(HashUtil.getBufferSize()));
-            String filePath = file.getAbsolutePath();
+            String filePath = file.toPath().toAbsolutePath().normalize().toString();
 
             FileMetadata metadata =
                     new FileMetadata(fileId, fileName, fileHash, uploadTime, uploader, fileSize, filePath, description);
 
-            log.debug("Created file metadata: {}", fileName);
+            log.debug("Created file metadata: {}", metadata);
             return metadata;
 
         } catch (IOException e) {

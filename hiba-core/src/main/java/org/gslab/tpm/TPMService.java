@@ -16,7 +16,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import org.gslab.Tool.Util;
+import org.gslab.util.Util;
 import org.gslab.tpm.exception.TPMConnectionException;
 import tss.*;
 import tss.tpm.*;
@@ -77,8 +77,6 @@ import tss.tpm.*;
  * @author TPM Test Project
  * @version 1.0
  * @since 2024
- * @see TPMSignAndVerify 簽章與驗證示範程式
- * @see TPMEndorsementKey EK 讀取示範程式
  * @see <a href=
  *      "https://trustedcomputinggroup.org/resource/tpm-library-specification/">TCG
  *      TPM 2.0 規範</a>

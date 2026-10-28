@@ -204,17 +204,17 @@ public class PublicKeyCacheService {
         log.info("=====================================================================");
         log.info("                       Cache Statistics                             ");
         log.info("=====================================================================");
-        log.info("  Current cache size: {:,} entries                                  ", cache.estimatedSize());
-        log.info("  Cache hits: {:,}                                                  ", cacheHits.get());
-        log.info("  Cache misses: {:,}                                                ", cacheMisses.get());
-        log.info("  External loads: {:,}                                              ", externalLoads.get());
+        log.info("  Current cache size: {} entries                                  ", cache.estimatedSize());
+        log.info("  Cache hits: {}                                                  ", cacheHits.get());
+        log.info("  Cache misses: {}                                                ", cacheMisses.get());
+        log.info("  External loads: {}                                              ", externalLoads.get());
         log.info("  Hit rate: {}                                                      ", getHitRateString());
         log.info("                                                                    ");
         log.info("  Caffeine Stats:                                                   ");
-        log.info("    - Request count: {:,}                                           ", stats.requestCount());
-        log.info("    - Hit rate: {:.2f}%                                             ", stats.hitRate() * 100);
-        log.info("    - Load count: {:,}                                              ", stats.loadCount());
-        log.info("    - Eviction count: {:,}                                          ", stats.evictionCount());
+        log.info("    - Request count: {}                                           ", stats.requestCount());
+        log.info("    - Hit rate: {}%                                             ", stats.hitRate() * 100);
+        log.info("    - Load count: {}                                              ", stats.loadCount());
+        log.info("    - Eviction count: {}                                          ", stats.evictionCount());
         log.info("=====================================================================");
     }
 

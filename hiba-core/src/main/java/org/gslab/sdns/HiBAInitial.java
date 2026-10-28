@@ -8,15 +8,15 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.HashMap;
 import java.util.Map;
-import org.gslab.Tool.CPUInfo;
-import org.gslab.Tool.JsonFileTool;
-import org.gslab.Tool.ResourceCleanupManager;
+import org.gslab.util.CPUInfo;
+import org.gslab.util.JsonFileUtil;
+import org.gslab.util.ResourceCleanupManager;
 import org.gslab.configuration.HibaNetworkConfig;
 import org.gslab.configuration.SystemConfigurationLoader;
 import org.gslab.fileProtection.BlockchainFileProtectManager;
 import org.gslab.fileProtection.config.BlockchainFileProtectManagerConfig;
 import org.gslab.fileProtection.service.FileProtectionService;
-import org.gslab.service.mService.multicast.Traceroute;
+import org.gslab.mService.multicast.Traceroute;
 import org.gslab.tpm.TPMService;
 import org.gslab.tpm.exception.TPMConnectionException;
 import org.slf4j.Logger;
@@ -100,7 +100,7 @@ public class HiBAInitial {
         boolean state = false;
         sysName = System.getProperty("user.name");
 
-        Map<String, Object> serviceTree = JsonFileTool.ReadFile(serviceFile).toMap();
+        Map<String, Object> serviceTree = JsonFileUtil.ReadFile(serviceFile).toMap();
         Map<String, Object> hibaNetwork = (Map<String, Object>) serviceTree.get("HiBANetwork");
         Map<String, Object> multicastController = (Map<String, Object>) serviceTree.get("multicastController");
         Map<String, Object> mobileNetwork = (Map<String, Object>) serviceTree.get("MobileNetwork");

@@ -15,7 +15,7 @@ pid_path: "{{ remote_destination_dir }}/hiba.pid"
 
 # 定義log的輸出等級: DEBUG, INFO
 log_level: "INFO"
-#log_level: "DEBUG"
+# log_level: "DEBUG"
 
 # 定義TPM log的輸出等級: DEBUG, INFO, WARN, OFF
 tpm_log_level: "OFF"

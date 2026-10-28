@@ -34,11 +34,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.gslab.App;
 import org.gslab.SdnNetwork;
-import org.gslab.Tool.AESTools;
-import org.gslab.Tool.CPUUsageRate;
-import org.gslab.Tool.JsonFileTool;
-import org.gslab.Tool.ResourceCleanupManager;
-import org.gslab.Tool.ReverseSSHTunnelManager;
+import org.gslab.util.AESUtil;
+import org.gslab.util.CPUUsageRate;
+import org.gslab.util.JsonFileUtil;
+import org.gslab.util.ResourceCleanupManager;
+import org.gslab.util.ReverseSSHTunnelManager;
 import org.gslab.configuration.HibaNetworkConfig;
 import org.gslab.configuration.MessageVerificationConfig;
 import org.gslab.configuration.MobileNetworkConfig;
@@ -75,9 +75,9 @@ import org.gslab.protocol.HiBAFrameDecoder;
 import org.gslab.protocol.MessageCodec;
 import org.gslab.sdnMobileControl.MobileNetworkController;
 import org.gslab.sdnMobileControl.multicast.MobileMulticastReceiver;
-import org.gslab.service.mService.multicast.MulticastController;
-import org.gslab.service.mService.multicast.MulticastReceiver;
-import org.gslab.service.mService.multicast.Traceroute;
+import org.gslab.mService.multicast.MulticastController;
+import org.gslab.mService.multicast.MulticastReceiver;
+import org.gslab.mService.multicast.Traceroute;
 import org.gslab.tpm.PublicKeyCacheService;
 import org.gslab.tpm.blockchain.Web3BlockchainService;
 import org.gslab.tpm.exception.TPMConnectionException;
@@ -269,7 +269,7 @@ public class HiBANetwork implements SdnNetwork {
                 if (HiBAInitial.MobileControllerState) {
                     File jsonList = new File("./RSU.json");
                     Map<String, Object> RSUWiFiList = new HashMap<>();
-                    RSUWiFiList = JsonFileTool.ReadFile(jsonList).toMap();
+                    RSUWiFiList = JsonFileUtil.ReadFile(jsonList).toMap();
                     new Thread(new MobileNetworkController(RSUWiFiList)).start();
                     if (HiBAInitial.startOBU) {
                         new Thread(new MobileMulticastReceiver()).start();
@@ -418,7 +418,7 @@ public class HiBANetwork implements SdnNetwork {
                                 String nodeName = msg.getLowerLayerNodeName();
                                 String connectionTime = msg.getConnectionTime();
                                 ArrayList<String> nodeUsedPort = msg.getLowerNodeUsedPort();
-                                String plaintext = AESTools.decryptAES(lowerLayerPubKey, connectionTime);
+                                String plaintext = AESUtil.decryptAES(lowerLayerPubKey, connectionTime);
                                 logger.atInfo()
                                         .addKeyValue("nodeName", nodeName)
                                         .log(
@@ -462,7 +462,7 @@ public class HiBANetwork implements SdnNetwork {
                                         }
                                     }
                                     String resConnectionTime = Long.toString(System.currentTimeMillis());
-                                    String ciphertext = AESTools.encryptAES(HiBAInitial.pubKey, resConnectionTime);
+                                    String ciphertext = AESUtil.encryptAES(HiBAInitial.pubKey, resConnectionTime);
                                     ctx.channel()
                                             .writeAndFlush(new createReverseChannelResponse(
                                                     ciphertext,
@@ -797,7 +797,7 @@ public class HiBANetwork implements SdnNetwork {
 
         public MulticastBrokerSelector() {
             File scoreFile = new File("./device/score.json");
-            Map<String, Object> map = JsonFileTool.ReadFile(scoreFile).toMap();
+            Map<String, Object> map = JsonFileUtil.ReadFile(scoreFile).toMap();
             logger.atInfo().addKeyValue("score", map.get("score")).log("CPU score from file: {}", map.get("score"));
             score = Float.parseFloat((String) map.get("score"));
             // score = ThreadLocalRandom.current().nextLong(100);
@@ -967,7 +967,7 @@ public class HiBANetwork implements SdnNetwork {
                                                         connectToBroker(clientBootstrap, mightBroker);
                                                 String connectionTime = Long.toString(System.currentTimeMillis());
                                                 String ciphertext =
-                                                        AESTools.encryptAES(HiBAInitial.pubKey, connectionTime);
+                                                        AESUtil.encryptAES(HiBAInitial.pubKey, connectionTime);
                                                 // watchdog.start();
                                                 createReverseChannelResponse response =
                                                         (createReverseChannelResponse) sendMessage(
@@ -984,7 +984,7 @@ public class HiBANetwork implements SdnNetwork {
                                                 String pubKey = response.getPubKey();
                                                 String reConnectionTime = response.getConnectionTime();
                                                 Integer port = response.getPort();
-                                                String plaintext = AESTools.decryptAES(pubKey, reConnectionTime);
+                                                String plaintext = AESUtil.decryptAES(pubKey, reConnectionTime);
                                                 if (setChannelPubKey(plaintext)) {
                                                     if (createReverseChannel(brokerDeviceName, brokerIP, port)) {
                                                         logger.atInfo().log(
@@ -1085,7 +1085,7 @@ public class HiBANetwork implements SdnNetwork {
                                 for (String mightBroker : mightUpperBroker) {
                                     ChannelFuture connectFuture = connectToBroker(clientBootstrap, mightBroker);
                                     String connectionTime = Long.toString(System.currentTimeMillis());
-                                    String ciphertext = AESTools.encryptAES(HiBAInitial.pubKey, connectionTime);
+                                    String ciphertext = AESUtil.encryptAES(HiBAInitial.pubKey, connectionTime);
                                     logger.atInfo().log(
                                             "Associate the upper layer node to confirm the upper layer broker, current node: {}",
                                             mightBroker);
@@ -1104,7 +1104,7 @@ public class HiBANetwork implements SdnNetwork {
                                     String pubKey = response.getPubKey();
                                     String reConnectionTime = response.getConnectionTime();
                                     Integer port = response.getPort();
-                                    String plaintext = AESTools.decryptAES(pubKey, reConnectionTime);
+                                    String plaintext = AESUtil.decryptAES(pubKey, reConnectionTime);
                                     if (setChannelPubKey(plaintext)) {
                                         logger.atDebug().log("Set channel PubKey success.");
                                         logger.atDebug().log(

@@ -16,7 +16,7 @@ import org.gslab.Distributor;
 import org.gslab.HiBAService;
 import org.gslab.SdnNetwork;
 import org.gslab.Taker;
-import org.gslab.Tool.JsonFileTool;
+import org.gslab.util.JsonFileUtil;
 import org.gslab.context.RequestContext;
 import org.gslab.context.RequestManager;
 import org.gslab.message_hiba.RegisteMessage;
@@ -718,7 +718,7 @@ public class ServerChannelHandlers {
 
                 String responseFile =
                         "./response" + File.separator + requestName + "_" + localTime.get("date") + ".json";
-                JsonFileTool.WriteFile(new JSONObject(upperBrokerResponse), new File(responseFile));
+                JsonFileUtil.WriteFile(new JSONObject(upperBrokerResponse), new File(responseFile));
 
                 log.atInfo()
                         .addKeyValue("requestId", requestId)
