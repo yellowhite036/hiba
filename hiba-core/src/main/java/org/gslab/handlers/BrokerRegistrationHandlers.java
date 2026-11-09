@@ -21,7 +21,13 @@ public class BrokerRegistrationHandlers {
 
     /**
      * Lifecycle handler for RegisteMessage channel
-     * Handles channelReadComplete and exceptionCaught events
+     * Handles exceptionCaught events.
+     *
+     * Note: the channel must NOT be closed in channelReadComplete. That event fires after every
+     * socket read batch, even when the frame decoder has only received part of a message. A signed
+     * RegisteResponse (~1.7 KB) spans two TCP segments; if the second segment arrives a few ms later
+     * (e.g. over Wi-Fi), closing here drops it and the request times out. The channel is closed by
+     * RegistrationResponseHandler once a complete RegisteResponse has been decoded.
      */
     public static class RegistrationLifecycleHandler extends ChannelInboundHandlerAdapter {
         private final RequestId requestId;
@@ -30,16 +36,6 @@ public class BrokerRegistrationHandlers {
         public RegistrationLifecycleHandler(RequestId requestId, String requestName) {
             this.requestId = requestId;
             this.requestName = requestName;
-        }
-
-        @Override
-        public void channelReadComplete(ChannelHandlerContext ctx) throws Exception {
-            logger.atDebug()
-                    .addKeyValue("requestId", requestId)
-                    .addKeyValue("requestName", requestName)
-                    .log("RegisteMessage channelReadComplete, closing channel");
-            ctx.channel().close();
-            super.channelReadComplete(ctx);
         }
 
         @Override
@@ -85,6 +81,22 @@ public class BrokerRegistrationHandlers {
 
             // Complete the future with the response
             responseFuture.complete(msg);
+
+            // Close only after a complete RegisteResponse has been received
+            logger.atDebug()
+                    .addKeyValue("requestId", requestId)
+                    .addKeyValue("requestName", requestName)
+                    .log("RegisteResponse received, closing channel");
+            ctx.channel().close();
+        }
+
+        @Override
+        public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+            // Connection closed before a complete RegisteResponse arrived: fail fast instead of
+            // waiting for the caller's timeout. No effect if the future is already completed.
+            responseFuture.completeExceptionally(
+                    new java.io.IOException("Connection closed before RegisteResponse was received"));
+            super.channelInactive(ctx);
         }
 
         @Override

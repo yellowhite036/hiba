@@ -98,6 +98,8 @@ public class HiBANetwork implements SdnNetwork {
 
     private String accountingServerHost = "";
 
+    private static final long SEND_MESSAGE_TIMEOUT_SECONDS = 10; // sendMessage() max wait for a reply
+
     private Channel brokerChannel; // lower layer connection to upper layer broker channel.
     private Channel accountingServerChannel; // Accounting server heartBeat channel.
 
@@ -614,13 +616,11 @@ public class HiBANetwork implements SdnNetwork {
                             @Override
                             public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
                                 response.set(msg);
-                                super.channelRead(ctx, msg);
-                            }
-
-                            @Override
-                            public void channelReadComplete(ChannelHandlerContext ctx) throws Exception {
+                                // Close only after a complete message has been decoded. Closing in
+                                // channelReadComplete drops the rest of a message split across TCP
+                                // segments that arrive a few ms apart (e.g. over Wi-Fi).
                                 ctx.channel().close();
-                                super.channelReadComplete(ctx);
+                                super.channelRead(ctx, msg);
                             }
                         });
                     }
@@ -633,7 +633,10 @@ public class HiBANetwork implements SdnNetwork {
             throw new Exception(channelFuture.cause());
         }
 
-        channelFuture.channel().closeFuture().await();
+        // Bounded wait: the peer may never answer now that we no longer close after the first read
+        if (!channelFuture.channel().closeFuture().await(SEND_MESSAGE_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+            channelFuture.channel().close();
+        }
 
         return response.get();
     }
