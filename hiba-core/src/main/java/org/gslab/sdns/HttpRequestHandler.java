@@ -36,6 +36,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import org.gslab.App;
+import org.gslab.status.NodeStatusHttp;
 import org.gslab.util.PathUtil;
 import org.gslab.util.StringUtil;
 import org.gslab.context.RequestContext;
@@ -98,6 +99,11 @@ public class HttpRequestHandler extends SimpleChannelInboundHandler<FullHttpRequ
         RequestId requestId = RequestId.generate();
 
         try {
+            // 節點狀態頁（GET /nodes、/api/nodes，只在 accounting server 上）
+            if (NodeStatusHttp.handle(ctx, request)) {
+                return;
+            }
+
             // Only handle POST requests
             if (!request.method().equals(HttpMethod.POST)) {
                 sendErrorResponse(

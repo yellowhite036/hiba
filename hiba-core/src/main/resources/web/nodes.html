@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HiBA 節點狀態</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --text: #1d2330; --muted: #6a7282; --line: #e2e5ea;
+    --accent: #2f6fdb; --ok: #1f9d55; --warn: #c27c0e; --bad: #d14343; --off: #9aa1ad;
+    --chip: #eef1f5; --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --panel: #1b1f27; --text: #e6e9ef; --muted: #98a0ae; --line: #2b313c;
+      --accent: #6c9cff; --ok: #3ccf7f; --warn: #e0a63a; --bad: #ff6b6b; --off: #6b7280; --chip: #262c36;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.5 system-ui, -apple-system, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 40px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
+  h1 { font-size: 22px; margin: 0; }
+  h2 { font-size: 16px; margin: 28px 0 10px; }
+  .muted { color: var(--muted); }
+  .mono { font-family: var(--mono); font-size: 12.5px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 16px; }
+  .tile .num { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .tile .label { color: var(--muted); font-size: 13px; }
+  .alert { margin-top: 14px; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--warn);
+           background: color-mix(in srgb, var(--warn) 12%, transparent); }
+  .alert.bad { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin: 28px 0 10px; }
+  .toolbar h2 { margin: 0; margin-right: auto; }
+  label { cursor: pointer; user-select: none; }
+  ul.tree, ul.tree ul { list-style: none; margin: 0; padding: 0; }
+  ul.tree ul { margin-left: 18px; padding-left: 14px; border-left: 1px dashed var(--line); }
+  .node { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 7px 10px; margin: 4px 0;
+          border-radius: 8px; border: 1px solid transparent; }
+  .node:hover { border-color: var(--line); background: var(--panel); }
+  .node.offline { opacity: .62; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--off); }
+  .dot.online { background: var(--ok); }
+  .dot.root { background: var(--accent); }
+  .name { font-weight: 600; }
+  .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--chip); font-size: 12px; white-space: nowrap; }
+  .chip.broker { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+  .chip.ok { color: var(--ok); } .chip.bad { color: var(--bad); } .chip.warn { color: var(--warn); }
+  details.res { flex-basis: 100%; margin-left: 19px; }
+  details.res summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+  details.res table { margin-top: 4px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 13px; }
+  .scroll { overflow-x: auto; }
+  .empty { color: var(--muted); padding: 6px 2px; }
+  footer { margin-top: 30px; color: var(--muted); font-size: 12.5px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>HiBA 節點狀態</h1>
+      <div class="muted" id="acct">accounting server</div>
+    </div>
+    <div class="muted" id="updated">讀取中…</div>
+  </header>
+
+  <div id="alerts"></div>
+
+  <section class="tiles">
+    <div class="panel tile"><div class="num" id="t-total">–</div><div class="label">節點總數</div></div>
+    <div class="panel tile"><div class="num" id="t-online">–</div><div class="label">在線</div></div>
+    <div class="panel tile"><div class="num" id="t-brokers">–</div><div class="label">在線 broker</div></div>
+    <div class="panel tile"><div class="num" id="t-never">–</div><div class="label">已註冊未上線</div></div>
+  </section>
+
+  <div class="toolbar">
+    <h2>節點樹</h2>
+    <label><input type="checkbox" id="show-offline"> 顯示離線節點</label>
+    <label><input type="checkbox" id="show-res"> 展開資源</label>
+  </div>
+  <div class="panel"><ul class="tree" id="tree"></ul></div>
+
+  <h2>broker 讓位紀錄</h2>
+  <div class="panel scroll" id="stepdowns"></div>
+
+  <h2>TPM 鏈上註冊</h2>
+  <div class="panel" id="chain"></div>
+
+  <footer>資料來源：<span class="mono">/api/nodes</span>，每 5 秒更新。超過 <span id="timeout">15</span> 秒沒有回報視為離線。</footer>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var REFRESH_MS = 5000;
+  var last = null;
+
+  function el(id) { return document.getElementById(id); }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function shortEk(ek) { return ek ? ek.slice(0, 8) + "…" + ek.slice(-4) : ""; }
+  function ago(ms, now) {
+    if (!ms) return "從未";
+    var s = Math.max(0, Math.round((now - ms) / 1000));
+    if (s < 60) return s + " 秒前";
+    if (s < 3600) return Math.round(s / 60) + " 分鐘前";
+    if (s < 86400) return Math.round(s / 3600) + " 小時前";
+    return Math.round(s / 86400) + " 天前";
+  }
+  function clock(ms) {
+    var d = new Date(ms), p = function (n) { return (n < 10 ? "0" : "") + n; };
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " +
+      p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+  }
+  function prefGet(key) { try { return localStorage.getItem(key) === "1"; } catch (e) { return false; } }
+  function prefSet(key, on) { try { localStorage.setItem(key, on ? "1" : "0"); } catch (e) {} }
+  function subnet(ip) { return ip ? ip.split(".").slice(0, 3).join(".") : ""; }
+
+  function chainChip(n, chainOk) {
+    if (!n.ek) return '<span class="chip warn" title="沒有 EK（未開 TPM 簽章或尚未收到簽章訊息）">無 EK</span>';
+    var c = n.chain || {};
+    if (!chainOk || c.registered == null) return '<span class="chip">鏈上未檢查</span>';
+    if (!c.registered) return '<span class="chip bad">未註冊</span>';
+    if (!c.active) return '<span class="chip bad">已撤銷</span>';
+    return '<span class="chip ok">已註冊</span>';
+  }
+
+  function resourceBlock(n, open) {
+    var keys = Object.keys(n.resources || {}).sort();
+    if (!keys.length) return "";
+    var rows = keys.map(function (k) {
+      return "<tr><th>" + esc(k) + '</th><td class="mono">' + esc(n.resources[k]) + "</td></tr>";
+    }).join("");
+    return '<details class="res"' + (open ? " open" : "") + "><summary>資源（" + keys.length + "）</summary>" +
+      '<div class="scroll"><table>' + rows + "</table></div></details>";
+  }
+
+  function nodeRow(n, now, chainOk, openRes) {
+    var online = n.status === "online";
+    return '<div class="node' + (online ? "" : " offline") + '">' +
+      '<span class="dot' + (online ? " online" : "") + '" title="' + (online ? "在線" : "離線") + '"></span>' +
+      '<span class="name">' + esc(n.name) + "</span>" +
+      (n.role === "broker" ? '<span class="chip broker">broker</span>' : "") +
+      '<span class="mono muted">' + esc(n.ip || "-") + "</span>" +
+      (n.ek ? '<span class="mono muted" title="' + esc(n.ek) + '">EK ' + esc(shortEk(n.ek)) + "</span>" : "") +
+      chainChip(n, chainOk) +
+      '<span class="muted">' + (online ? "回報 " : "最後回報 ") + ago(n.lastSeen, now) + "</span>" +
+      resourceBlock(n, openRes) + "</div>";
+  }
+
+  function renderTree(d) {
+    var now = d.generatedAt, chainOk = d.chainStatus && d.chainStatus.ok;
+    var showOff = el("show-offline").checked, openRes = el("show-res").checked;
+    var nodes = (d.nodes || []).filter(function (n) { return showOff || n.status === "online"; });
+    var byName = {}, kids = {};
+    nodes.forEach(function (n) { byName[n.name] = n; });
+    var roots = [];
+    nodes.forEach(function (n) {
+      if (n.broker && byName[n.broker] && n.broker !== n.name) {
+        (kids[n.broker] = kids[n.broker] || []).push(n);
+      } else {
+        roots.push(n);
+      }
+    });
+    var seen = {};
+    function branch(n) {
+      if (seen[n.name]) return "";
+      seen[n.name] = true;
+      var children = (kids[n.name] || []).map(branch).join("");
+      return "<li>" + nodeRow(n, now, chainOk, openRes) + (children ? "<ul>" + children + "</ul>" : "") + "</li>";
+    }
+    var acctName = (d.accountingServer && d.accountingServer.name) || "accounting server";
+    var inner = roots.map(branch).join("");
+    el("tree").innerHTML = "<li><div class=\"node\"><span class=\"dot root\"></span>" +
+      '<span class="name">' + esc(acctName) + '</span><span class="chip">accounting server</span></div>' +
+      (inner ? "<ul>" + inner + "</ul>" : '<ul><li class="empty">' +
+        (showOff ? "還沒有任何 broker 回報" : "目前沒有在線節點（可勾選「顯示離線節點」）") + "</li></ul>") + "</li>";
+  }
+
+  function renderAlerts(d) {
+    var html = [];
+    var cs = d.chainStatus || {};
+    if (!cs.ok) {
+      html.push('<div class="alert bad">讀不到 TPMDeviceRegistry 鏈上資料：' + esc(cs.error || "未知錯誤") +
+        "。註冊狀態暫時無法判斷。</div>");
+    }
+    // 同網段同時有多個最上層 broker：broker 合併機制應在幾秒內讓其中一方讓位
+    var groups = {};
+    (d.nodes || []).forEach(function (n) {
+      if (n.status === "online" && n.role === "broker" && !n.broker) {
+        var key = subnet(n.ip);
+        (groups[key] = groups[key] || []).push(n.name);
+      }
+    });
+    Object.keys(groups).forEach(function (net) {
+      if (groups[net].length > 1) {
+        html.push('<div class="alert">' + esc(net) + ".x 網段同時有 " + groups[net].length + " 個 broker：" +
+          esc(groups[net].join("、")) + "。若持續超過 30 秒，請檢查它們是否在同一個 multicast 網段。</div>");
+      }
+    });
+    el("alerts").innerHTML = html.join("");
+  }
+
+  function renderStepDowns(d) {
+    var list = d.stepDowns || [];
+    if (!list.length) {
+      el("stepdowns").innerHTML = '<div class="empty">還沒有 broker 讓位過。</div>';
+      return;
+    }
+    el("stepdowns").innerHTML = "<table><thead><tr><th>時間</th><th>讓位的 broker</th><th>勝出的 broker</th></tr></thead><tbody>" +
+      list.map(function (s) {
+        return "<tr><td>" + esc(clock(s.time)) + '<div class="muted">' + ago(s.time, d.generatedAt) + "</div></td>" +
+          "<td>" + esc(s.broker) + ' <span class="mono muted">' + esc(s.brokerIp || "") + "</span></td>" +
+          "<td>" + esc(s.winner) + ' <span class="mono muted">' + esc(s.winnerIp || "") + "</span></td></tr>";
+      }).join("") + "</tbody></table>";
+  }
+
+  function renderChain(d) {
+    var cs = d.chainStatus || {};
+    var head = '<div class="muted">' + (cs.ok
+      ? "合約共 " + cs.deviceCount + " 台已註冊裝置，上次讀取 " + ago(cs.fetchedAt, d.generatedAt) + "（每 60 秒）。"
+      : "鏈上資料不可用" + (cs.fetchedAt ? "，以下為 " + ago(cs.fetchedAt, d.generatedAt) + " 的資料" : "") + "。") + "</div>";
+    var never = d.registeredNeverSeen || [];
+    var body = never.length
+      ? '<div class="scroll"><table><thead><tr><th>已註冊但從未出現的 EK</th><th>狀態</th></tr></thead><tbody>' +
+        never.map(function (x) {
+          return '<tr><td class="mono">' + esc(x.ek) + "</td><td>" +
+            (x.active ? '<span class="chip ok">啟用</span>' : '<span class="chip bad">已撤銷</span>') + "</td></tr>";
+        }).join("") + "</tbody></table></div>"
+      : '<div class="empty">所有已註冊的裝置都出現過。</div>';
+    el("chain").innerHTML = head + body;
+  }
+
+  function render(d) {
+    last = d;
+    var s = d.summary || {};
+    el("acct").textContent = "accounting server：" + ((d.accountingServer && d.accountingServer.name) || "-");
+    el("t-total").textContent = s.total;
+    el("t-online").textContent = s.online;
+    el("t-brokers").textContent = s.brokers;
+    el("t-never").textContent = s.registeredNeverSeen;
+    el("timeout").textContent = Math.round((d.onlineTimeoutMs || 15000) / 1000);
+    renderAlerts(d);
+    renderTree(d);
+    renderStepDowns(d);
+    renderChain(d);
+    el("updated").textContent = "更新於 " + clock(d.generatedAt);
+  }
+
+  function load() {
+    fetch("/api/nodes", { cache: "no-store" })
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(render)
+      .catch(function (e) {
+        el("updated").textContent = "更新失敗（" + e.message + "），稍後重試";
+      })
+      .then(function () { setTimeout(load, REFRESH_MS); });
+  }
+
+  ["show-offline", "show-res"].forEach(function (id) {
+    var box = el(id);
+    box.checked = prefGet("hiba." + id);
+    box.addEventListener("change", function () {
+      prefSet("hiba." + id, box.checked);
+      if (last) renderTree(last);
+    });
+  });
+  load();
+})();
+</script>
+</body>
+</html>

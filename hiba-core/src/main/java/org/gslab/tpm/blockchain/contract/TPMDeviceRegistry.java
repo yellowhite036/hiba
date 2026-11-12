@@ -184,6 +184,25 @@ public class TPMDeviceRegistry extends Contract {
         return executeRemoteCallSingleValueReturn(function, BigInteger.class);
     }
 
+    /**
+     * 分頁取得已註冊設備的 EK 指紋（合約回傳 fingerprints 與 total，這裡只取 fingerprints；總數用 getDeviceCount）
+     */
+    public RemoteFunctionCall<List<String>> getRegisteredDevices(BigInteger offset, BigInteger limit) {
+        final Function function = new Function(
+                "getRegisteredDevices",
+                Arrays.<Type>asList(new Uint256(offset), new Uint256(limit)),
+                Arrays.<TypeReference<?>>asList(
+                        new TypeReference<DynamicArray<Utf8String>>() {}, new TypeReference<Uint256>() {}));
+        return new RemoteFunctionCall<>(function, () -> {
+            List<Type> results = executeCallMultipleValueReturn(function);
+            List<String> fingerprints = new ArrayList<>();
+            for (Object item : ((DynamicArray<?>) results.get(0)).getValue()) {
+                fingerprints.add(((Utf8String) item).getValue());
+            }
+            return fingerprints;
+        });
+    }
+
     // ============ 設備管理功能 ============
 
     /**

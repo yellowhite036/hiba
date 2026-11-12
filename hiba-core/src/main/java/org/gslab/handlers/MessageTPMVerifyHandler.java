@@ -2,6 +2,7 @@ package org.gslab.handlers;
 
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.util.AttributeKey;
 import java.io.ByteArrayInputStream;
 import java.io.ObjectInputStream;
 import java.nio.file.Files;
@@ -71,6 +72,12 @@ public class MessageTPMVerifyHandler extends SimpleChannelInboundHandler<Message
          */
         BLOCKCHAIN_PREFERRED
     }
+
+    /**
+     * 這條連線對端的 EK 指紋：第一則通過驗證的 SignedMessage 之後設定。
+     * 節點狀態頁用它得知 broker 與各下層節點的 EK（沒開 TPM 簽章時不會設定）。
+     */
+    public static final AttributeKey<String> PEER_EK_FINGERPRINT = AttributeKey.valueOf("hiba.peerEkFingerprint");
 
     private final VerificationMode mode;
     private final Web3BlockchainService blockchainService;
@@ -219,7 +226,10 @@ public class MessageTPMVerifyHandler extends SimpleChannelInboundHandler<Message
                 // 7. 檢查是否為 getFile 服務的回應，若是則儲存 TPM 驗證報告
                 checkAndSaveTPMVerificationReport(signedMessage, originalMessage);
 
-                // 8. 傳遞原始 Message 給下一個 Handler
+                // 8. 記下這條連線對端的 EK 指紋（節點狀態頁用）
+                ctx.channel().attr(PEER_EK_FINGERPRINT).set(signedMessage.getDeviceId());
+
+                // 9. 傳遞原始 Message 給下一個 Handler
                 ctx.fireChannelRead(originalMessage);
             } else {
                 log.warn("Signature verification failed! Data may have been tampered with");

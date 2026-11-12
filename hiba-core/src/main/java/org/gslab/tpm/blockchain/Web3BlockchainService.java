@@ -6,7 +6,9 @@ import java.security.KeyFactory;
 import java.security.PublicKey;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import lombok.extern.slf4j.Slf4j;
@@ -404,6 +406,26 @@ public class Web3BlockchainService implements AutoCloseable {
             log.error("[Blockchain] Failed to get active device count: {}", e.getMessage());
             return 0;
         }
+    }
+
+    /**
+     * 列出所有已註冊設備的 EK 指紋與啟用狀態（節點狀態頁用）。
+     * 查詢失敗時直接丟出例外，讓呼叫端知道鏈上資料不可用，而不是當成「沒有設備」。
+     *
+     * @return EK 指紋 → 是否啟用（未撤銷）
+     */
+    public Map<String, Boolean> listRegisteredDevices() throws Exception {
+        final int pageSize = 100;
+        long total = contract.getDeviceCount().send().longValue();
+        Map<String, Boolean> devices = new LinkedHashMap<>();
+        for (long offset = 0; offset < total; offset += pageSize) {
+            List<String> page = contract.getRegisteredDevices(BigInteger.valueOf(offset), BigInteger.valueOf(pageSize))
+                    .send();
+            for (String ek : page) {
+                devices.put(ek, Boolean.TRUE.equals(contract.isDeviceActive(ek).send()));
+            }
+        }
+        return devices;
     }
 
     // ============ 設備管理功能 ============

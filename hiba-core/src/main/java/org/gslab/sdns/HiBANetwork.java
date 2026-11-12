@@ -5,6 +5,7 @@ import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandler.Sharable;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
@@ -32,6 +33,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
+import java.util.function.Supplier;
 import org.gslab.App;
 import org.gslab.SdnNetwork;
 import org.gslab.util.AESUtil;
@@ -50,6 +53,7 @@ import org.gslab.handlers.MessageTPMVerifyHandler.VerificationMode;
 import org.gslab.handlers.NonceValidator;
 import org.gslab.message_hiba.AccountingTestMessage;
 import org.gslab.message_hiba.AccountingTestResponse;
+import org.gslab.message_hiba.BrokerStepDownNotice;
 import org.gslab.message_hiba.FileTransferFormat;
 import org.gslab.message_hiba.GetBrokerList;
 import org.gslab.message_hiba.GetBrokerListResponse;
@@ -57,6 +61,7 @@ import org.gslab.message_hiba.GetBrokerNameMessage;
 import org.gslab.message_hiba.GetBrokerNameResponse;
 import org.gslab.message_hiba.LoginMessage;
 import org.gslab.message_hiba.Message;
+import org.gslab.message_hiba.NodeStatusReport;
 import org.gslab.message_hiba.ResourceUpdateMessage;
 import org.gslab.message_hiba.ScorePublishMessage;
 import org.gslab.message_hiba.ScorePublishResponse;
@@ -80,6 +85,7 @@ import org.gslab.mService.multicast.MulticastReceiver;
 import org.gslab.mService.multicast.Traceroute;
 import org.gslab.tpm.PublicKeyCacheService;
 import org.gslab.tpm.blockchain.Web3BlockchainService;
+import org.gslab.status.NodeStatusRegistry;
 import org.gslab.tpm.exception.TPMConnectionException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -141,6 +147,15 @@ public class HiBANetwork implements SdnNetwork {
     public static void requestStepDown(String winnerName, String winnerIP) {
         stepDownTarget.set(Map.entry(winnerName, winnerIP));
     }
+
+    // 節點狀態報告用：broker 每 NODE_REPORT_INTERVAL_SEC 秒向 accounting server 報告自己與下層節點
+    private static final int NODE_REPORT_INTERVAL_SEC = 5;
+    private static final int RESOURCE_SUMMARY_MAX_KEYS = 12;
+    private static final int RESOURCE_SUMMARY_MAX_CHARS = 120;
+    private volatile Supplier<Map<String, Object>> localResourceSource = Map::of;
+    private volatile Function<String, Map<String, Object>> nodeResourceSource = name -> null;
+    private volatile String localEkFingerprint = null;
+
     final SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
 
     public static final Map<String, Object> reverseChannelList = new HashMap<>();
@@ -263,6 +278,20 @@ public class HiBANetwork implements SdnNetwork {
                 .privateKey(tpmDeviceRegistryConfig.getPrivateKey())
                 .cacheService(new PublicKeyCacheService())
                 .build();
+
+        // 節點狀態頁（/nodes、/api/nodes）只在 accounting server 上啟用
+        NodeStatusRegistry.get().enable(HiBAInitial.nodeName, tpmDeviceRegistryService);
+    }
+
+    /**
+     * 由 App 提供資源資料，broker 送狀態報告時附上每台節點的資源摘要。
+     *
+     * @param local 本機的資源
+     * @param byNode nodeName → 該下層節點回報的資源（沒有則回傳 null）
+     */
+    public void setResourceSources(Supplier<Map<String, Object>> local, Function<String, Map<String, Object>> byNode) {
+        this.localResourceSource = local;
+        this.nodeResourceSource = byNode;
     }
 
     public void start() throws Exception {
@@ -516,6 +545,28 @@ public class HiBANetwork implements SdnNetwork {
                         }
 
                         if ("server".equals(localName)) {
+                            // 節點狀態頁：broker 的狀態報告與讓位通知
+                            channel.pipeline().addLast(new SimpleChannelInboundHandler<NodeStatusReport>() {
+                                @Override
+                                protected void channelRead0(ChannelHandlerContext ctx, NodeStatusReport msg) {
+                                    String remoteIp = ((InetSocketAddress) ctx.channel().remoteAddress())
+                                            .getAddress()
+                                            .getHostAddress();
+                                    NodeStatusRegistry.get()
+                                            .onReport(
+                                                    msg,
+                                                    ctx.channel()
+                                                            .attr(MessageTPMVerifyHandler.PEER_EK_FINGERPRINT)
+                                                            .get(),
+                                                    remoteIp);
+                                }
+                            });
+                            channel.pipeline().addLast(new SimpleChannelInboundHandler<BrokerStepDownNotice>() {
+                                @Override
+                                protected void channelRead0(ChannelHandlerContext ctx, BrokerStepDownNotice msg) {
+                                    NodeStatusRegistry.get().onStepDown(msg);
+                                }
+                            });
                             channel.pipeline().addLast(acctClientKeepAliver);
                         } else {
                             channel.pipeline().addLast(clientKeepAliver);
@@ -1324,7 +1375,11 @@ public class HiBANetwork implements SdnNetwork {
 
             Channel acct = accountingServerChannel;
             accountingServerChannel = null;
-            if (acct != null) {
+            if (acct != null && acct.isActive()) {
+                // 最後一則訊息：讓 accounting server 記下這次讓位（節點狀態頁），送完再關閉
+                acct.writeAndFlush(new BrokerStepDownNotice(localName, LOCAL_IP, winner.getKey(), winner.getValue()))
+                        .addListener(ChannelFutureListener.CLOSE);
+            } else if (acct != null) {
                 acct.close();
             }
             Channel upper = brokerChannel;
@@ -1410,6 +1465,59 @@ public class HiBANetwork implements SdnNetwork {
         }
     }
 
+    // ============ 節點狀態報告（broker → accounting server） ============
+
+    private NodeStatusReport buildStatusReport() {
+        NodeStatusReport.NodeEntry self = new NodeStatusReport.NodeEntry(
+                localName, LOCAL_IP, localEk(), summarizeResources(localResourceSource.get()));
+        ArrayList<NodeStatusReport.NodeEntry> lower = new ArrayList<>();
+        clients.forEach((channel, info) -> {
+            String name = info.getKey();
+            lower.add(new NodeStatusReport.NodeEntry(
+                    name,
+                    info.getValue(),
+                    channel.attr(MessageTPMVerifyHandler.PEER_EK_FINGERPRINT).get(),
+                    summarizeResources(nodeResourceSource.apply(name))));
+        });
+        return new NodeStatusReport(self, lower);
+    }
+
+    /** 本機 EK 指紋；沒有 TPM 或讀取失敗時回傳 null（下次再試） */
+    private String localEk() {
+        String ek = localEkFingerprint;
+        if (ek == null && HiBAInitial.tpmService != null) {
+            try {
+                ek = HiBAInitial.tpmService.getEKFingerprint();
+                localEkFingerprint = ek;
+            } catch (Exception e) {
+                logger.atDebug().setCause(e).log("Cannot read local EK fingerprint for node status report");
+            }
+        }
+        return ek;
+    }
+
+    /** 把資源資料縮成少量「鍵 → 短字串」，避免報告過大 */
+    private static Map<String, String> summarizeResources(Map<String, Object> resource) {
+        Map<String, String> summary = new HashMap<>();
+        if (resource == null) {
+            return summary;
+        }
+        for (Map.Entry<String, Object> e : new HashMap<>(resource).entrySet()) {
+            if (summary.size() >= RESOURCE_SUMMARY_MAX_KEYS) {
+                break;
+            }
+            if (e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            String value = String.valueOf(e.getValue());
+            if (value.length() > RESOURCE_SUMMARY_MAX_CHARS) {
+                value = value.substring(0, RESOURCE_SUMMARY_MAX_CHARS) + "…";
+            }
+            summary.put(e.getKey(), value);
+        }
+        return summary;
+    }
+
     @Sharable
     private class AcctServerKeepAliver extends SimpleChannelInboundHandler<AccountingTestResponse>
             implements Runnable { // broker
@@ -1423,6 +1531,7 @@ public class HiBANetwork implements SdnNetwork {
         private final AccountingTestMessage accountingTestMessage = new AccountingTestMessage();
         private int msgCount = 0;
         private int msgCount1 = 0;
+        private int reportTick = NODE_REPORT_INTERVAL_SEC - 1; // 連上之後馬上送第一份報告
 
         @Override
         public void run() {
@@ -1431,6 +1540,7 @@ public class HiBANetwork implements SdnNetwork {
                 delay(1);
 
                 if (accountingServerChannel == null) {
+                    reportTick = NODE_REPORT_INTERVAL_SEC - 1;
                     continue;
                 }
 
@@ -1438,6 +1548,19 @@ public class HiBANetwork implements SdnNetwork {
                     ChannelFuture testFuture = accountingServerChannel.writeAndFlush(accountingTestMessage);
                     testFuture.await();
                 } catch (InterruptedException e) {
+                }
+
+                // 節點狀態頁：每 NODE_REPORT_INTERVAL_SEC 秒報告本 broker 與下層節點
+                if (++reportTick >= NODE_REPORT_INTERVAL_SEC) {
+                    reportTick = 0;
+                    Channel acct = accountingServerChannel;
+                    if (acct != null && acct.isActive()) {
+                        try {
+                            acct.writeAndFlush(buildStatusReport());
+                        } catch (Exception e) {
+                            logger.atDebug().setCause(e).log("Failed to send node status report");
+                        }
+                    }
                 }
 
                 int times = responseTimeoutSec.getAndIncrement();

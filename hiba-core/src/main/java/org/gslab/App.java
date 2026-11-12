@@ -98,6 +98,11 @@ public class App {
         AtomicInteger distributeNodes = new AtomicInteger(0);
         distributeThread = initializeDistributeThread(distributeNodes);
 
+        // 節點狀態頁：broker 送狀態報告時附上本機與下層節點的資源摘要
+        if (network instanceof HiBANetwork hibaNetwork) {
+            hibaNetwork.setResourceSources(() -> localResource, resourceList::get);
+        }
+
         // Start network and thread last to avoid race conditions
         network.start();
         distributeThread.start();
