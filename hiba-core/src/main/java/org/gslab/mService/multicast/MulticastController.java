@@ -49,6 +49,7 @@ public class MulticastController implements Runnable {
     public static String localName = "";
     public static String highestScoreNodeName = "";
     private static final Map<String, Float> scoreMap = new HashMap<>();
+    private static final int BROKER_BEACON_TICKS = 10; // 主迴圈每圈約 0.5 秒 → 約每 5 秒發一次 broker 信標
     public static boolean interfaceState = true;
     public static boolean restartReceiver = true;
 
@@ -67,6 +68,7 @@ public class MulticastController implements Runnable {
         int highestScoreNodeNameTimeout = 0;
         int checkVoteTimeout = 0;
         int isClientAndNoBrokerBroadcastTimeout = 0;
+        int brokerBeaconTick = 0;
         localName = HiBAInitial.nodeName;
 
         startMulticastTime = System.currentTimeMillis();
@@ -216,9 +218,7 @@ public class MulticastController implements Runnable {
                                 MulticastController.endMulticastTime - MulticastController.startMulticastTime;
                         LOGGER.atInfo().log("> 選舉總計耗時: {} sec.", timeConsuming / 1000.00);
 
-                        brokerContent.put("mode", "brokerBroadcast");
-                        brokerContent.put("nodeName", localName);
-                        brokerContent.put("ip", HiBANetwork.LOCAL_IP);
+                        brokerContent.putAll(brokerBeacon());
                         LOGGER.atInfo().log("broker broadcast : {}", brokerContent);
                         for (int i = 0; i < HiBAInitial.isBrokerMCASTFrequency; i++) {
                             MulticastPublisher.sendMulticast(brokerContent);
@@ -234,6 +234,11 @@ public class MulticastController implements Runnable {
                     break;
 
                 case "isBroker":
+                    // 定期發出 broker 信標：原本 broker 只在收到 init 時才廣播，同網段的兩個 broker 永遠不會發現彼此
+                    if (++brokerBeaconTick >= BROKER_BEACON_TICKS) {
+                        brokerBeaconTick = 0;
+                        MulticastPublisher.sendMulticast(brokerBeacon());
+                    }
                     break;
 
                 case "isClient":
@@ -251,6 +256,73 @@ public class MulticastController implements Runnable {
                     break;
             }
         }
+    }
+
+    /*
+     * broker 廣播內容。score、mandatory 讓同網段的其他 broker 判斷誰該讓位（見 handleOtherBroker）。
+     * 注意 converToMap 用「,」「=」切字串，所以值裡不能有這兩個字元。
+     */
+    public static HashMap<String, Object> brokerBeacon() {
+        HashMap<String, Object> beacon = new HashMap<>();
+        beacon.put("mode", "brokerBroadcast");
+        beacon.put("nodeName", localName);
+        beacon.put("ip", HiBANetwork.LOCAL_IP);
+        beacon.put("score", String.valueOf(HiBANetwork.localScore));
+        beacon.put("mandatory", String.valueOf(HiBAInitial.mandatoryBroker));
+        return beacon;
+    }
+
+    /*
+     * 本機是 broker 時，收到同網段另一個 broker 的廣播。
+     * 兩邊用同一套規則比較，結果一定一致，只有輸的一方讓位：
+     *   1. mandatoryBroker 的贏；兩邊都是 mandatory 就都不讓
+     *   2. 分數高的贏（和選舉相同）
+     *   3. 分數相同，nodeName 字母順序小的贏
+     * 欄位缺漏或 score 格式不對的廣播（封包不完整）直接忽略，不會因此讓位。
+     */
+    public static void handleOtherBroker(Map<String, Object> info) {
+        String otherName = (String) info.get("nodeName");
+        String otherIP = (String) info.get("ip");
+        String otherScoreText = (String) info.get("score");
+        if (otherName == null || otherIP == null || otherScoreText == null || otherName.equals(localName)) {
+            return;
+        }
+        float otherScore;
+        try {
+            otherScore = Float.parseFloat(otherScoreText);
+        } catch (NumberFormatException e) {
+            return;
+        }
+        boolean otherMandatory = "true".equals(info.get("mandatory"));
+        if (otherBrokerWins(
+                HiBAInitial.mandatoryBroker, HiBANetwork.localScore, localName, otherMandatory, otherScore, otherName)) {
+            LOGGER.atInfo().log(
+                    "Found another broker {} ({}, score {}) in the same network, it wins over local (score {}).",
+                    otherName,
+                    otherIP,
+                    otherScore,
+                    HiBANetwork.localScore);
+            HiBANetwork.requestStepDown(otherName, otherIP);
+        }
+    }
+
+    static boolean otherBrokerWins(
+            boolean localMandatory,
+            float localScore,
+            String localName,
+            boolean otherMandatory,
+            float otherScore,
+            String otherName) {
+        if (localMandatory) {
+            return false;
+        }
+        if (otherMandatory) {
+            return true;
+        }
+        if (Float.compare(otherScore, localScore) != 0) {
+            return otherScore > localScore;
+        }
+        return otherName.compareTo(localName) < 0;
     }
 
     public static void addInitNode(Map<String, Object> nodeInfo) {

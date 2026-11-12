@@ -106,11 +106,10 @@ public class MulticastReceiver implements Runnable {
 
                             case "isBroker":
                                 if (information.get("mode").equals("init")) {
-                                    HashMap<String, Object> brokerContent = new HashMap<>();
-                                    brokerContent.put("mode", "brokerBroadcast");
-                                    brokerContent.put("nodeName", MulticastController.localName);
-                                    brokerContent.put("ip", HiBANetwork.LOCAL_IP);
-                                    MulticastPublisher.sendMulticast(brokerContent);
+                                    MulticastPublisher.sendMulticast(MulticastController.brokerBeacon());
+                                } else if (information.get("mode").equals("brokerBroadcast")
+                                        && !HiBANetwork.blackList.containsKey((String) information.get("nodeName"))) {
+                                    MulticastController.handleOtherBroker(information);
                                 }
                                 break;
 

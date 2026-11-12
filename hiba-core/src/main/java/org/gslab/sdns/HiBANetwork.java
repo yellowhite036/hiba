@@ -133,6 +133,14 @@ public class HiBANetwork implements SdnNetwork {
     public static String MULTICAST_INTERFACE;
     public static String LOCAL_IP;
     public static String BROKER_IP;
+    // 本機的 broker 選舉分數（device/score.json），放進 broker 信標讓同網段的其他 broker 比較
+    public static volatile float localScore = 0;
+    // 同網段有另一個 broker 勝出時，由 MulticastReceiver 設定；由 MulticastBrokerSelector 執行讓位
+    private static final AtomicReference<Map.Entry<String, String>> stepDownTarget = new AtomicReference<>();
+
+    public static void requestStepDown(String winnerName, String winnerIP) {
+        stepDownTarget.set(Map.entry(winnerName, winnerIP));
+    }
     final SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
 
     public static final Map<String, Object> reverseChannelList = new HashMap<>();
@@ -803,6 +811,7 @@ public class HiBANetwork implements SdnNetwork {
             Map<String, Object> map = JsonFileUtil.ReadFile(scoreFile).toMap();
             logger.atInfo().addKeyValue("score", map.get("score")).log("CPU score from file: {}", map.get("score"));
             score = Float.parseFloat((String) map.get("score"));
+            localScore = score;
             // score = ThreadLocalRandom.current().nextLong(100);
         }
 
@@ -856,6 +865,7 @@ public class HiBANetwork implements SdnNetwork {
                             resetEvent = false;
                         }
                         scoreMap.clear();
+                        stepDownTarget.set(null); // 上一任 broker 期間殘留的讓位要求不再有效
                         break;
 
                     case "connection":
@@ -903,6 +913,11 @@ public class HiBANetwork implements SdnNetwork {
                         break;
 
                     case "isBroker":
+                        Map.Entry<String, String> winner = stepDownTarget.getAndSet(null);
+                        if (winner != null) {
+                            stepDownTo(winner);
+                            break;
+                        }
                         ArrayList<String> acctResponseBrokerList = new ArrayList<>(); // accounting server response all
                         // broker host list.
                         ArrayList<String> mightUpperBroker = new ArrayList<>(); // Filter acctResponseBrokerList by
@@ -1287,6 +1302,39 @@ public class HiBANetwork implements SdnNetwork {
         private void clearReverseChannel() {
             logger.atInfo().log("Closing SSH tunnel");
             sshTunnelManager.close();
+        }
+
+        /*
+         * 同網段的另一個 broker 勝出：本機放棄 broker 身分，回到 init 重新加入。
+         * 勝出的 broker 會回應本機的 init 廣播，本機就成為它底下的節點；
+         * 本機原本的下層節點連線被關閉後，3 秒內會偵測到 broker 斷線，回到 init，同樣加入勝出的 broker。
+         */
+        private void stepDownTo(Map.Entry<String, String> winner) {
+            logger.atInfo()
+                    .addKeyValue("winnerName", winner.getKey())
+                    .addKeyValue("winnerIP", winner.getValue())
+                    .log("Another broker {} ({}) wins, local broker steps down and rejoins.",
+                            winner.getKey(), winner.getValue());
+            MulticastController.startMulticastTime = 0;
+            MulticastController.setMode("init"); // 先改模式，之後關連線觸發的事件就不會再當成 broker 處理
+            sameTierNodes.clear();
+            sameTierNodesCheck.clear();
+            mulitcastMap.clear();
+            brokerInformation.clear();
+
+            Channel acct = accountingServerChannel;
+            accountingServerChannel = null;
+            if (acct != null) {
+                acct.close();
+            }
+            Channel upper = brokerChannel;
+            brokerChannel = null;
+            if (upper != null) {
+                upper.close();
+            }
+            clearReverseChannel();
+            setChannelPubKey("clear");
+            new ArrayList<>(clients.keySet()).forEach(Channel::close);
         }
 
         private boolean runCommand(String cmd) {
