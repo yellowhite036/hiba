@@ -416,6 +416,17 @@
     return v.current ? `<span class="badge b-ok">${icon("check")}最新版</span>`
                      : `<span class="badge b-warn">${icon("alert")}舊版</span>`;
   };
+  // accounting server 自己執行中的 jar（啟動時記下）；和「提供的 jar」不同代表 jar 檔換了但還沒重啟
+  const acctMd5 = (d) => (d.accountingServer && d.accountingServer.version && d.accountingServer.version.md5) || null;
+  const acctStale = (d) => !!(acctMd5(d) && d.dist && d.dist.md5 && acctMd5(d) !== d.dist.md5);
+  const acctVersionBadge = (d) => {
+    if (!acctMd5(d)) return `<span class="badge b-plain">${icon("help")}版本不明</span>`;
+    return acctStale(d) ? `<span class="badge b-warn">${icon("alert")}尚未重啟</span>`
+                        : `<span class="badge b-ok">${icon("check")}執行中</span>`;
+  };
+  const acctVersionLine = (d) => acctMd5(d)
+    ? `<span class="mono" title="${esc(acctMd5(d))}">版本 ${esc(shortMd5(acctMd5(d)))}${acctStale(d) ? `（提供 ${esc(shortMd5(d.dist.md5))}，尚未重啟）` : ""}</span>`
+    : "";
   const resLabel = (k) => ({ computility: "CPU 分數", fileNameCount: "檔案數" }[k] || k);
   const resValue = (k, v) => (k === "computility" && !isNaN(parseFloat(v)) ? parseFloat(v).toFixed(2) : v);
 
@@ -538,7 +549,7 @@
         label = `Accounting server，${sub.online}/${sub.total} 在線`;
         card = `<div class="node root is-online">
             <div class="node-h"><span class="kind root">${icon("server")}</span><span class="name">Accounting server</span></div>
-            <span class="mono">${esc(location.hostname)}</span>
+            <span class="mono">${esc(location.hostname)}</span>${acctVersionLine(d)}
             <div class="node-f"><span class="badge b-ok">${icon("check")}運作中</span><span>${sub.online}/${sub.total} 在線</span></div>
           </div>`;
       } else {
@@ -666,7 +677,7 @@
             aria-label="${esc(`Accounting server，${pm.nets.size} 個網段`)}" ${kids.length ? 'aria-expanded="true"' : ""} tabindex="-1">
             <div class="node root is-online">
               <div class="node-h"><span class="kind root">${icon("server")}</span><span class="name">Accounting server</span></div>
-              <span class="mono">${esc(location.hostname)}</span>
+              <span class="mono">${esc(location.hostname)}</span>${acctVersionLine(d)}
               <div class="node-f"><span class="badge b-ok">${icon("check")}運作中</span><span>${pm.nets.size} 個網段・${online}/${d.nodes.length} 在線</span></div>
             </div>
             ${kids.length ? `<ul role="group">${kids.map((c) => item(c, 2, ROOT)).join("")}</ul>` : ""}</li>`;
@@ -765,6 +776,9 @@
       $("detail").innerHTML = state.selected === ROOT
         ? `<dl class="dl"><dt>角色</dt><dd>Accounting server</dd><dt>位址</dt><dd class="mono">${esc(location.host)}</dd>
              <dt>說明</dt><dd>彙整所有 broker 的回報，${d.onlineTimeoutMs / 1000} 秒沒回報即視為離線。</dd>
+             <dt>版本</dt><dd>${acctVersionBadge(d)}<div class="muted small mono">${esc(acctMd5(d) || "–")}</div>
+               ${acctStale(d) ? `<div class="muted small">jar 檔已換成新版，但程式還沒重啟；重啟後才會生效。</div>` : ""}</dd>
+             <dt>啟動時間</dt><dd>${d.accountingServer && d.accountingServer.startedAt ? `${esc(fmtTime(d.accountingServer.startedAt))}<div class="muted small">${ago(d.accountingServer.startedAt, d.generatedAt || Date.now())}</div>` : "–"}</dd>
              <dt>提供的 jar</dt><dd class="mono">${esc((d.dist && d.dist.md5) || "沒有（節點無法自動更新）")}</dd></dl>`
         : `<p class="detail-empty">點一個節點查看詳細資料。</p>`;
       return;

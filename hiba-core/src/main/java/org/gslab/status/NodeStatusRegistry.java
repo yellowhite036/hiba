@@ -1,5 +1,6 @@
 package org.gslab.status;
 
+import java.lang.management.ManagementFactory;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -57,6 +58,8 @@ public final class NodeStatusRegistry {
 
     private volatile boolean enabled = false;
     private volatile String accountingServerName = "";
+    private volatile String runningMd5; // accounting server 自己執行中的 jar；從 IDE 執行時為 null
+    private volatile long startedAt;
 
     private final Map<String, NodeRecord> nodes = new ConcurrentHashMap<>(); // nodeName → 最後一次看到的資料
     private final Deque<JSONObject> stepDowns = new ArrayDeque<>(); // 新的在前，存取時要 synchronized
@@ -81,6 +84,9 @@ public final class NodeStatusRegistry {
         }
         this.accountingServerName = accountingServerName == null ? "" : accountingServerName;
         this.chain = chain;
+        // 啟動時就記下執行中 jar 的 md5：之後 jar 檔被換掉但還沒重啟，網頁才分得出來
+        this.runningMd5 = DistJar.md5Of(DistJar.runningJar());
+        this.startedAt = ManagementFactory.getRuntimeMXBean().getStartTime();
         this.enabled = true;
 
         ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -301,7 +307,16 @@ public final class NodeStatusRegistry {
 
         return new JSONObject()
                 .put("generatedAt", now)
-                .put("accountingServer", new JSONObject().put("name", accountingServerName))
+                .put(
+                        "accountingServer",
+                        new JSONObject()
+                                .put("name", accountingServerName)
+                                .put("startedAt", startedAt)
+                                .put(
+                                        "version",
+                                        new JSONObject()
+                                                .put("md5", nullToJson(runningMd5))
+                                                .put("current", runningMd5 != null && runningMd5.equals(distMd5))))
                 .put("onlineTimeoutMs", ONLINE_TIMEOUT_MS)
                 .put(
                         "summary",

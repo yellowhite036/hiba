@@ -40,6 +40,11 @@ public final class DistJar {
             File f = new File(override);
             return f.isFile() ? f : null;
         }
+        return runningJar();
+    }
+
+    /** @return 目前這個程式執行的 jar；從 IDE / classes 目錄執行時回傳 null */
+    public static File runningJar() {
         try {
             File f = new File(DistJar.class
                     .getProtectionDomain()
@@ -63,6 +68,21 @@ public final class DistJar {
         if (f.equals(cachedFile) && size == cachedSize && modified == cachedModified && cachedMd5 != null) {
             return cachedMd5;
         }
+        String md5 = md5Of(f);
+        if (md5 != null) {
+            cachedMd5 = md5;
+            cachedFile = f;
+            cachedSize = size;
+            cachedModified = modified;
+        }
+        return md5;
+    }
+
+    /** @return 檔案的 md5（小寫 16 進位）；讀取失敗時回傳 null */
+    public static String md5Of(File f) {
+        if (f == null) {
+            return null;
+        }
         try (InputStream in = Files.newInputStream(f.toPath())) {
             MessageDigest digest = MessageDigest.getInstance("MD5");
             byte[] buffer = new byte[64 * 1024];
@@ -70,11 +90,7 @@ public final class DistJar {
             while ((n = in.read(buffer)) > 0) {
                 digest.update(buffer, 0, n);
             }
-            cachedMd5 = HexFormat.of().formatHex(digest.digest());
-            cachedFile = f;
-            cachedSize = size;
-            cachedModified = modified;
-            return cachedMd5;
+            return HexFormat.of().formatHex(digest.digest());
         } catch (IOException | NoSuchAlgorithmException e) {
             logger.atWarn().log("Cannot compute md5 of {}: {}", f, e.getMessage());
             return null;

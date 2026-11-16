@@ -30,8 +30,7 @@ import org.slf4j.LoggerFactory;
 /**
  * 節點狀態頁的 HTTP 路由（只在 accounting server 上有效）：
  * <ul>
- * <li>GET / 、GET /nodes → 狀態網頁（resources/web/nodes.html）</li>
- * <li>GET /api/nodes → 狀態 JSON（安裝腳本也會讀它）</li>
+ * <li>GET / 、GET /nodes → 狀態網頁（resources/web/nodes.html）</li> * <li>GET /api/nodes → 狀態 JSON（安裝腳本也會讀它）</li>
  * <li>DELETE /api/nodes/{name} → 從節點表移除一台離線節點（在線的回 409）</li>
  * <li>GET /dist/hiba-core-0.0.1.jar.md5?node=&amp;have=&amp;running= → 目前提供的 jar 的 md5；
  *     節點的自動更新程式（hiba_autoupdate.sh）每次檢查時呼叫，順便回報自己的版本</li>
@@ -69,7 +68,7 @@ public final class NodeStatusHttp {
             case "/":
             case "/nodes":
             case "/nodes/":
-                byte[] page = loadPage();
+                byte[] page = loadResource(PAGE_RESOURCE);
                 if (page == null) {
                     send(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR, "text/plain; charset=UTF-8",
                             "nodes.html not found in jar".getBytes(StandardCharsets.UTF_8));
@@ -166,11 +165,11 @@ public final class NodeStatusHttp {
                 : null;
     }
 
-    private static byte[] loadPage() {
-        try (InputStream in = NodeStatusHttp.class.getResourceAsStream(PAGE_RESOURCE)) {
+    private static byte[] loadResource(String resource) {
+        try (InputStream in = NodeStatusHttp.class.getResourceAsStream(resource)) {
             return in == null ? null : in.readAllBytes();
         } catch (IOException e) {
-            logger.atWarn().setCause(e).log("Failed to read {}", PAGE_RESOURCE);
+            logger.atWarn().setCause(e).log("Failed to read {}", resource);
             return null;
         }
     }
