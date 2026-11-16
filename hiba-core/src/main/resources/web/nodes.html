@@ -3,277 +3,1044 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>HiBA 節點狀態</title>
+<title>HiBA 節點拓撲</title>
 <style>
+  /* ===== Design tokens ===== */
   :root {
-    --bg: #f5f6f8; --panel: #ffffff; --text: #1d2330; --muted: #6a7282; --line: #e2e5ea;
-    --accent: #2f6fdb; --ok: #1f9d55; --warn: #c27c0e; --bad: #d14343; --off: #9aa1ad;
-    --chip: #eef1f5; --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    --bg: #F8FAFC; --surface: #FFFFFF; --surface-2: #F1F5F9; --text: #0F172A; --muted: #475569;
+    --border: #E2E8F0; --border-strong: #CBD5E1;
+    --primary: #2563EB; --primary-soft: #DBEAFE; --on-primary: #FFFFFF;
+    --ok: #15803D; --ok-soft: #DCFCE7; --bad: #B91C1C; --bad-soft: #FEE2E2;
+    --warn: #A16207; --warn-soft: #FEF9C3; --neutral-soft: #E2E8F0;
+    --focus: #2563EB; --line: #94A3B8; --canvas: #F1F5F9;
+    --radius: 10px; --radius-sm: 6px;
+    --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
+    --font: system-ui, -apple-system, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", "PingFang TC", sans-serif;
+    --mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, monospace;
+    --shadow: 0 1px 2px rgb(15 23 42 / 6%), 0 1px 3px rgb(15 23 42 / 8%);
+    --ease: 160ms ease-out;
+    --gap-y: 28px;   /* vertical length of a branch connector */
+    --gap-x: 10px;   /* half the horizontal gap between sibling cards */
+    color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #12151b; --panel: #1b1f27; --text: #e6e9ef; --muted: #98a0ae; --line: #2b313c;
-      --accent: #6c9cff; --ok: #3ccf7f; --warn: #e0a63a; --bad: #ff6b6b; --off: #6b7280; --chip: #262c36;
+      --bg: #0B1120; --surface: #111827; --surface-2: #1A2232; --text: #E5E7EB; --muted: #9CA3AF;
+      --border: #1F2937; --border-strong: #334155;
+      --primary: #60A5FA; --primary-soft: #172554; --on-primary: #0B1120;
+      --ok: #4ADE80; --ok-soft: #052E16; --bad: #F87171; --bad-soft: #3B0D0D;
+      --warn: #FACC15; --warn-soft: #3A2E05; --neutral-soft: #1F2937;
+      --focus: #93C5FD; --line: #475569; --canvas: #0D1424;
+      --shadow: 0 1px 2px rgb(0 0 0 / 40%);
+      color-scheme: dark;
     }
   }
+  @media (prefers-reduced-motion: reduce) { :root { --ease: 0ms; } }
+
+  /* ===== Base ===== */
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text);
-         font: 14px/1.5 system-ui, -apple-system, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif; }
-  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 40px; }
-  header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
-  h1 { font-size: 22px; margin: 0; }
-  h2 { font-size: 16px; margin: 28px 0 10px; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 var(--font); }
+  main { max-width: 1600px; margin: 0 auto; padding: var(--s5) var(--s4) var(--s6); }
+  h1 { font-size: 22px; line-height: 1.3; margin: 0; }
+  h2 { font-size: 17px; margin: 0; }
   .muted { color: var(--muted); }
-  .mono { font-family: var(--mono); font-size: 12.5px; }
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 16px; }
-  .tile .num { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; }
-  .tile .label { color: var(--muted); font-size: 13px; }
-  .alert { margin-top: 14px; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--warn);
-           background: color-mix(in srgb, var(--warn) 12%, transparent); }
-  .alert.bad { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
-  .toolbar { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin: 28px 0 10px; }
-  .toolbar h2 { margin: 0; margin-right: auto; }
-  label { cursor: pointer; user-select: none; }
-  ul.tree, ul.tree ul { list-style: none; margin: 0; padding: 0; }
-  ul.tree ul { margin-left: 18px; padding-left: 14px; border-left: 1px dashed var(--line); }
-  .node { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 7px 10px; margin: 4px 0;
-          border-radius: 8px; border: 1px solid transparent; }
-  .node:hover { border-color: var(--line); background: var(--panel); }
-  .node.offline { opacity: .62; }
-  .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--off); }
-  .dot.online { background: var(--ok); }
-  .dot.root { background: var(--accent); }
-  .name { font-weight: 600; }
-  .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--chip); font-size: 12px; white-space: nowrap; }
-  .chip.broker { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
-  .chip.ok { color: var(--ok); } .chip.bad { color: var(--bad); } .chip.warn { color: var(--warn); }
-  details.res { flex-basis: 100%; margin-left: 19px; }
-  details.res summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
-  details.res table { margin-top: 4px; }
-  table { border-collapse: collapse; width: 100%; }
-  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
-  th { color: var(--muted); font-weight: 500; font-size: 13px; }
-  .scroll { overflow-x: auto; }
-  .empty { color: var(--muted); padding: 6px 2px; }
-  footer { margin-top: 30px; color: var(--muted); font-size: 12.5px; }
+  .small { font-size: 14px; }
+  .mono { font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  svg.i { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  /* ===== Buttons ===== */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--s2);
+         min-height: 44px; min-width: 44px; padding: 0 var(--s3); border-radius: var(--radius-sm);
+         border: 1px solid var(--border-strong); background: var(--surface); color: var(--text);
+         font: inherit; font-size: 15px; cursor: pointer; transition: background var(--ease), border-color var(--ease); }
+  .btn:hover { background: var(--surface-2); }
+  .btn:active { background: var(--neutral-soft); }
+  .btn.danger { color: var(--bad); border-color: var(--bad); }
+  .btn.danger:hover { background: var(--bad-soft); }
+  .btn[disabled] { opacity: .5; cursor: not-allowed; }
+
+  /* ===== Header ===== */
+  header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s3); }
+  .live { display: flex; align-items: center; gap: var(--s2); }
+  .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+  .paused .pulse { background: var(--muted); }
+  .banner { display: flex; gap: var(--s2); align-items: flex-start; border-radius: var(--radius); padding: var(--s3) var(--s4); margin-top: var(--s4); }
+  .banner.err { background: var(--bad-soft); color: var(--bad); }
+  .banner.warn { background: var(--warn-soft); color: var(--warn); }
+  .banner:empty { display: none; }
+
+  /* ===== Summary ===== */
+  .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s3); margin: var(--s4) 0; }
+  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--s3) var(--s4); box-shadow: var(--shadow); }
+  .stat .n { font-size: 28px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.2; }
+  .stat .l { display: flex; align-items: center; gap: var(--s1); color: var(--muted); font-size: 14px; }
+  .stat.ok .n { color: var(--ok); } .stat.bad .n { color: var(--bad); }
+  @media (max-width: 640px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+  /* ===== Toolbar ===== */
+  .toolbar { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; margin-bottom: var(--s3); }
+  .seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); overflow: hidden; background: var(--surface); }
+  .seg button { min-height: 44px; padding: 0 var(--s4); border: 0; background: transparent; color: var(--text); font: inherit; font-size: 15px; cursor: pointer; transition: background var(--ease); }
+  .seg button + button { border-left: 1px solid var(--border-strong); }
+  .seg button:hover { background: var(--surface-2); }
+  .seg button[aria-pressed="true"] { background: var(--primary); color: var(--on-primary); font-weight: 600; }
+  .search { position: relative; flex: 1 1 220px; max-width: 360px; }
+  .search svg { position: absolute; left: 12px; top: 13px; color: var(--muted); pointer-events: none; }
+  .search input { width: 100%; min-height: 44px; padding: 0 var(--s3) 0 40px; border-radius: var(--radius-sm);
+                  border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; }
+  .toolbar .spacer { flex: 1; }
+
+  /* ===== Layout ===== */
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: var(--s4); align-items: start; }
+  @media (max-width: 1279px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); min-width: 0; }
+  .panel-h { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s2); padding: var(--s3) var(--s4); border-bottom: 1px solid var(--border); }
+  .detail { position: sticky; top: var(--s4); }
+  @media (max-width: 1279px) { .detail { position: static; } }
+  @media (max-width: 640px) { .kbd-hint { display: none; } }
+
+  /* ===== Branch tree (org chart) ===== */
+  .canvas { overflow: auto; background: var(--canvas); border-radius: 0 0 var(--radius) var(--radius);
+            min-height: 240px; max-height: 72vh; cursor: grab; overscroll-behavior: contain; }
+  .canvas.dragging { cursor: grabbing; user-select: none; }
+  .org { display: inline-flex; justify-content: center; min-width: 100%; padding: var(--s5) var(--s4) var(--s6); margin: 0; }
+  .org, .org ul { list-style: none; }
+  .org ul { display: flex; justify-content: center; margin: 0; padding: var(--gap-y) 0 0; position: relative; }
+  .org li { position: relative; display: flex; flex-direction: column; align-items: center; padding: var(--gap-y) var(--gap-x) 0; }
+  .org > li { padding-top: 0; }
+
+  /* connectors: each child draws the elbow above itself; the parent's group draws the stem */
+  .org ul > li::before, .org ul > li::after {
+    content: ""; position: absolute; top: 0; width: 50%; height: var(--gap-y); border-top: 2px solid var(--line); }
+  .org ul > li::before { right: 50%; }
+  .org ul > li::after { left: 50%; border-left: 2px solid var(--line); }
+  .org ul > li:first-child::before, .org ul > li:last-child::after { border-top-color: transparent; }
+  .org ul > li:last-child::before { border-right: 2px solid var(--line); border-top-right-radius: 8px; }
+  .org ul > li:first-child::after { border-top-left-radius: 8px; }
+  .org ul > li:only-child::before { display: none; }
+  .org ul > li:only-child::after { border-top-color: transparent; border-radius: 0; }
+  .org ul::before { content: ""; position: absolute; top: 0; left: 50%; height: var(--gap-y); border-left: 2px solid var(--line); }
+
+  /* leaf-only groups (≥3 nodes without children) stack vertically on a rail to keep the chart narrow */
+  .org ul.leaves { flex-direction: column; align-items: flex-start; }
+  .org ul.leaves::before { left: 10px; width: calc(50% - 10px); height: calc(var(--gap-y) / 2);
+                           border-left: 0; border-right: 2px solid var(--line); border-bottom: 2px solid var(--line);
+                           border-bottom-right-radius: 8px; }
+  .org ul.leaves::after { content: ""; position: absolute; left: 10px; top: calc(var(--gap-y) / 2 - 2px);
+                          height: calc(var(--gap-y) / 2 + 2px); border-left: 2px solid var(--line); }
+  .org ul.leaves > li { padding: 8px 0 0 28px; align-items: flex-start; }
+  /* li = 8px padding + card, so the card's vertical centre sits at 50% + 4px */
+  .org ul.leaves > li::before { display: block; left: 10px; right: auto; top: calc(50% + 3px); width: 18px; height: 0;
+                                border: 0; border-top: 2px solid var(--line); border-radius: 0; }
+  .org ul.leaves > li::after { left: 10px; top: 0; width: 0; height: 100%; border: 0; border-left: 2px solid var(--line); border-radius: 0; }
+  .org ul.leaves > li:last-child::after { height: calc(50% + 5px); }
+  .org ul.leaves > li:first-child::before { border-top-color: var(--line); }
+
+  .node { position: relative; display: flex; flex-direction: column; gap: 2px; width: 176px; padding: var(--s2) var(--s3) var(--s3);
+          background: var(--surface); border: 1px solid var(--border-strong); border-top: 4px solid var(--line);
+          border-radius: var(--radius); box-shadow: var(--shadow); cursor: pointer; text-align: left;
+          transition: border-color var(--ease), background var(--ease); }
+  .node:hover { border-color: var(--primary); }
+  .node.is-online { border-top-color: var(--ok); }
+  .node.is-offline { border-top-color: var(--bad); border-style: dashed; border-top-style: solid; }
+  .node.is-offline .name, .node.is-offline .kind { opacity: .7; }
+  .node.root { width: 200px; border-top-color: var(--text); }
+  [role="treeitem"]:focus { outline: none; }
+  [role="treeitem"]:focus-visible > .node { outline: 3px solid var(--focus); outline-offset: 2px; }
+  [role="treeitem"][aria-selected="true"] > .node { background: var(--primary-soft); border-color: var(--primary); }
+  .node-h { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
+  .kind { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 7px; flex: none; background: var(--surface-2); color: var(--muted); }
+  .kind svg.i { width: 16px; height: 16px; }
+  .kind.broker { background: var(--primary-soft); color: var(--primary); }
+  .kind.root { background: var(--text); color: var(--surface); }
+  .name { font-weight: 650; font-size: 15px; line-height: 1.3; min-width: 0; overflow-wrap: anywhere; }
+  .node .mono { color: var(--muted); font-size: 12px; }
+  .node-f { display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--s2); margin-top: 2px; font-size: 13px; color: var(--muted); }
+  .hl { background: var(--warn-soft); color: inherit; border-radius: 3px; }
+
+  /* ===== Broker groups: each broker + its direct lower nodes share a colour and a letter ===== */
+  :root { --g0: #7C3AED; --g1: #B45309; --g2: #0F766E; --g3: #BE185D; --g4: #1D4ED8; --g5: #4D7C0F; }
+  @media (prefers-color-scheme: dark) {
+    :root { --g0: #A78BFA; --g1: #FBBF24; --g2: #2DD4BF; --g3: #F472B6; --g4: #60A5FA; --g5: #A3E635; }
+  }
+  .node[data-g] { border-left: 5px solid var(--gc); }
+  .node-ip { display: flex; align-items: center; gap: var(--s1); min-height: 20px; }
+  .gtag { margin-left: auto; flex: none; display: inline-flex; align-items: center; justify-content: center;
+          min-width: 20px; height: 20px; padding: 0 5px; border-radius: 999px; font-size: 12px; font-weight: 700;
+          border: 1.5px solid var(--gc); color: var(--gc); background: var(--surface); }
+  .gtag.head { background: var(--gc); color: var(--surface); }
+  .gtag + .gtag { margin-left: 4px; }
+  /* 群組框：包住 broker 卡片、展開按鈕和直屬下層 */
+  .gbox { position: relative; display: flex; flex-direction: column; align-items: center; padding: 12px 6px;
+          border: 2px dashed color-mix(in srgb, var(--gc) 70%, transparent); border-radius: 14px;
+          background: color-mix(in srgb, var(--gc) 10%, transparent); }
+  .org .gbox > .fold + ul { padding-top: calc(var(--gap-y) - 2px); }
+  .org .gbox > ul.leaves { padding-right: 6px; }
+  /* 上層連線穿過框線接到 broker 卡片 */
+  .org ul > li > .gbox::before { content: ""; position: absolute; top: -2px; left: 50%; height: 14px; border-left: 2px solid var(--line); }
+  .gname { display: inline-flex; align-items: center; gap: 6px; }
+
+  /* ===== Physical view: one card per /24 subnet, routers on the links ===== */
+  .node.subnet { width: 260px; cursor: pointer; }
+  .node.subnet .kind { background: var(--surface-2); color: var(--text); }
+  .subnet-rows { margin: var(--s2) 0 0; display: flex; flex-direction: column; gap: 2px; }
+  .pn { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 40px; padding: 3px 6px; border: 1px solid transparent;
+        border-radius: var(--radius-sm); background: transparent; color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+  .pn:hover { background: var(--surface-2); border-color: var(--border-strong); }
+  .pn[aria-current="true"] { background: var(--primary-soft); border-color: var(--primary); }
+  .pn .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--ok); }
+  .pn.off .dot { background: transparent; border: 2px solid var(--bad); }
+  .pn.off .pn-name { opacity: .7; }
+  .pn-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+  .pn-name { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+  .pn .mono { font-size: 12px; color: var(--muted); }
+  .pn .gtag { margin-left: auto; }
+  .pn.acct { cursor: default; }
+  .pn.acct:hover { background: transparent; border-color: transparent; }
+  .pn.acct .dot { background: var(--text); border-radius: 2px; }
+  .subnet-more { font-size: 12px; color: var(--muted); padding: 2px 6px; }
+  .link { position: relative; display: inline-flex; align-items: center; gap: 4px; margin-bottom: 12px; padding: 2px 8px;
+          border: 1px solid var(--border-strong); border-radius: 999px; background: var(--surface); color: var(--muted);
+          font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .link svg.i { width: 14px; height: 14px; }
+  .link::after { content: ""; position: absolute; left: 50%; top: 100%; height: 12px; border-left: 2px solid var(--line); }
+  .link.router { color: var(--text); border-color: var(--text); }
+  .gname .gtag { margin-left: 0; }
+
+  /* fold button under a card: 32px visual, 44px hit area */
+  .fold { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 2px; height: 26px; margin-top: -1px; padding: 0 var(--s2);
+          border: 1px solid var(--border-strong); border-top: 0; border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+          background: var(--surface); color: var(--muted); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .fold::after { content: ""; position: absolute; inset: -9px -6px; }
+  .fold:hover { color: var(--primary); }
+  .fold svg.i { width: 14px; height: 14px; transition: transform var(--ease); }
+  [aria-expanded="false"] > .fold svg.i { transform: rotate(-90deg); }
+  .org li > .fold + ul { padding-top: calc(var(--gap-y) - 2px); }
+  .tree-empty { padding: var(--s6) var(--s4); text-align: center; color: var(--muted); }
+
+  /* ===== Badges (icon + text, never colour alone) ===== */
+  .badge { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; flex: none; }
+  .badge svg.i { width: 13px; height: 13px; }
+  .b-ok { color: var(--ok); background: var(--ok-soft); }
+  .b-bad { color: var(--bad); background: var(--bad-soft); }
+  .b-warn { color: var(--warn); background: var(--warn-soft); }
+  .b-info { color: var(--primary); background: var(--primary-soft); }
+  .b-plain { color: var(--muted); background: var(--neutral-soft); }
+
+  /* ===== Detail panel ===== */
+  .dl { margin: 0; padding: var(--s3) var(--s4) var(--s4); display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: var(--s2) var(--s3); }
+  .dl dt { color: var(--muted); font-size: 14px; }
+  .dl dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+  .chips { display: flex; flex-wrap: wrap; gap: var(--s1); }
+  .chip { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0 var(--s2); font-size: 13px; }
+  .detail-empty { margin: 0; padding: var(--s5) var(--s4); color: var(--muted); }
+  .detail-actions { padding: 0 var(--s4) var(--s4); }
+
+  /* ===== Never-seen list ===== */
+  section.never { margin-top: var(--s5); }
+  .list { list-style: none; margin: 0; padding: 0; }
+  .list li { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s3); align-items: center; padding: var(--s3) var(--s4); border-top: 1px solid var(--border); }
+  .list li:first-child { border-top: 0; }
+  .list .mono { flex: 1 1 300px; }
+  .list .sd { flex: 1 1 300px; }
+  footer { margin-top: var(--s4); font-size: 14px; }
 </style>
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <!-- Icons: Lucide (ISC License) -->
+  <symbol id="i-server" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></symbol>
+  <symbol id="i-network" viewBox="0 0 24 24"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/></symbol>
+  <symbol id="i-router" viewBox="0 0 24 24"><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6.01 18H6M10.01 18H10M15 10v4M17.84 7.17a4 4 0 0 0-5.66 0M20.66 4.34a8 8 0 0 0-11.31 0"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></symbol>
+  <symbol id="i-lan" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="16" y="16" width="6" height="6" rx="1"/><path d="M12 8v4M5 16v-4h14v4"/></symbol>
+  <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-shield-off" viewBox="0 0 24 24"><path d="m2 2 20 20"/><path d="M5 5a1 1 0 0 0-1 1v7c0 5 3.5 7.5 7.67 8.94a1 1 0 0 0 .67.01c2.35-.82 4.48-1.97 5.9-3.71"/><path d="M9.31 3.66A12.4 12.4 0 0 0 11.24 2.28a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1v7a9.8 9.8 0 0 1-.08 1.26"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4M12 17h.01"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="m7 15 5 5 5-5M7 9l5-5 5 5"/></symbol>
+  <symbol id="i-collapse" viewBox="0 0 24 24"><path d="m7 20 5-5 5 5M7 4l5 5 5-5"/></symbol>
+  <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/></symbol>
+</svg>
+
 <main>
   <header>
     <div>
-      <h1>HiBA 節點狀態</h1>
-      <div class="muted" id="acct">accounting server</div>
+      <h1>HiBA 節點拓撲</h1>
+      <div class="muted small" id="updated">載入中…</div>
     </div>
-    <div class="muted" id="updated">讀取中…</div>
+    <div class="live" id="live">
+      <span class="pulse" aria-hidden="true"></span>
+      <button class="btn" id="pause" type="button" aria-pressed="false">
+        <svg class="i" aria-hidden="true"><use href="#i-pause"/></svg><span>暫停更新</span>
+      </button>
+    </div>
   </header>
 
-  <div id="alerts"></div>
+  <div id="banner" class="banner" role="status" aria-live="polite"></div>
 
-  <section class="tiles">
-    <div class="panel tile"><div class="num" id="t-total">–</div><div class="label">節點總數</div></div>
-    <div class="panel tile"><div class="num" id="t-online">–</div><div class="label">在線</div></div>
-    <div class="panel tile"><div class="num" id="t-brokers">–</div><div class="label">在線 broker</div></div>
-    <div class="panel tile"><div class="num" id="t-never">–</div><div class="label">已註冊未上線</div></div>
+  <section class="stats" aria-label="摘要">
+    <div class="stat"><div class="n" id="c-total">–</div><div class="l">曾出現的節點</div></div>
+    <div class="stat ok"><div class="n" id="c-online">–</div><div class="l"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>在線</div></div>
+    <div class="stat bad"><div class="n" id="c-offline">–</div><div class="l"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg>離線</div></div>
+    <div class="stat"><div class="n" id="c-never">–</div><div class="l">鏈上已註冊、未上線</div></div>
   </section>
 
   <div class="toolbar">
-    <h2>節點樹</h2>
-    <label><input type="checkbox" id="show-offline"> 顯示離線節點</label>
-    <label><input type="checkbox" id="show-res"> 展開資源</label>
+    <div class="seg" role="group" aria-label="依狀態篩選">
+      <button type="button" data-filter="all" aria-pressed="true">全部</button>
+      <button type="button" data-filter="online" aria-pressed="false">在線</button>
+      <button type="button" data-filter="offline" aria-pressed="false">離線</button>
+    </div>
+    <div class="seg" role="group" aria-label="檢視方式">
+      <button type="button" data-view="logical" aria-pressed="true">Broker 階層</button>
+      <button type="button" data-view="physical" aria-pressed="false">實體網路</button>
+    </div>
+    <div class="search">
+      <svg class="i" aria-hidden="true"><use href="#i-search"/></svg>
+      <label for="q" class="sr-only">搜尋節點</label>
+      <input type="search" id="q" placeholder="名稱、IP、EK…" autocomplete="off">
+    </div>
+    <span class="spacer"></span>
+    <button class="btn" type="button" id="center"><svg class="i" aria-hidden="true"><use href="#i-target"/></svg>置中</button>
+    <button class="btn" type="button" id="expand-all"><svg class="i" aria-hidden="true"><use href="#i-expand"/></svg>全部展開</button>
+    <button class="btn" type="button" id="collapse-all"><svg class="i" aria-hidden="true"><use href="#i-collapse"/></svg>全部收合</button>
   </div>
-  <div class="panel"><ul class="tree" id="tree"></ul></div>
 
-  <h2>broker 讓位紀錄</h2>
-  <div class="panel scroll" id="stepdowns"></div>
+  <div class="layout">
+    <section class="panel" aria-labelledby="tree-title">
+      <div class="panel-h">
+        <h2 id="tree-title">網路拓撲</h2>
+        <span class="muted small kbd-hint" id="tree-hint">↑ 上層・↓ 下層・←→ 同層・+/− 展開收合・Enter 查看・拖曳空白處平移</span>
+      </div>
+      <div class="canvas" id="canvas">
+        <ul class="org" id="tree" role="tree" aria-labelledby="tree-title"></ul>
+      </div>
+    </section>
 
-  <h2>TPM 鏈上註冊</h2>
-  <div class="panel" id="chain"></div>
+    <aside class="panel detail" aria-labelledby="detail-title">
+      <div class="panel-h"><h2 id="detail-title">節點詳細</h2></div>
+      <div id="detail"><p class="detail-empty">點一個節點查看詳細資料。</p></div>
+    </aside>
+  </div>
 
-  <footer>資料來源：<span class="mono">/api/nodes</span>，每 5 秒更新。超過 <span id="timeout">15</span> 秒沒有回報視為離線。</footer>
+  <section class="panel never" aria-labelledby="never-title">
+    <div class="panel-h">
+      <h2 id="never-title">鏈上已註冊、從未上線的設備</h2>
+      <span class="muted small" id="never-count"></span>
+    </div>
+    <ul class="list" id="never"></ul>
+  </section>
+
+  <section class="panel never" aria-labelledby="stepdown-title">
+    <div class="panel-h">
+      <h2 id="stepdown-title">Broker 讓位紀錄</h2>
+      <span class="muted small" id="stepdown-count"></span>
+    </div>
+    <ul class="list" id="stepdowns"></ul>
+  </section>
+
+  <footer class="muted" id="chain"></footer>
 </main>
 
 <script>
-(function () {
+(() => {
   "use strict";
-  var REFRESH_MS = 5000;
-  var last = null;
+  const REFRESH_MS = 3000;
+  const ROOT = "__accounting__";
+  const $ = (id) => document.getElementById(id);
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* ignore */ } },
+  };
+  const reduceMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  function el(id) { return document.getElementById(id); }
-  function esc(s) {
-    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
-      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
-    });
-  }
-  function shortEk(ek) { return ek ? ek.slice(0, 8) + "…" + ek.slice(-4) : ""; }
-  function ago(ms, now) {
+  const state = {
+    data: null, filter: "all", q: "", selected: null, focused: null, paused: false, error: null,
+    collapsed: new Set(store.get("hiba.tree.collapsed", [])), centered: false,
+    view: store.get("hiba.tree.view", "logical") === "physical" ? "physical" : "logical",
+  };
+
+  // ---------- helpers ----------
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const icon = (id) => `<svg class="i" aria-hidden="true"><use href="#i-${id}"/></svg>`;
+  const pad = (n) => String(n).padStart(2, "0");
+  const fmtTime = (ms) => {
+    if (!ms) return "–";
+    const d = new Date(ms);
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  };
+  const ago = (ms, now) => {
     if (!ms) return "從未";
-    var s = Math.max(0, Math.round((now - ms) / 1000));
-    if (s < 60) return s + " 秒前";
-    if (s < 3600) return Math.round(s / 60) + " 分鐘前";
-    if (s < 86400) return Math.round(s / 3600) + " 小時前";
-    return Math.round(s / 86400) + " 天前";
-  }
-  function clock(ms) {
-    var d = new Date(ms), p = function (n) { return (n < 10 ? "0" : "") + n; };
-    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " +
-      p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
-  }
-  function prefGet(key) { try { return localStorage.getItem(key) === "1"; } catch (e) { return false; } }
-  function prefSet(key, on) { try { localStorage.setItem(key, on ? "1" : "0"); } catch (e) {} }
-  function subnet(ip) { return ip ? ip.split(".").slice(0, 3).join(".") : ""; }
+    const s = Math.max(0, Math.round((now - ms) / 1000));
+    if (s < 60) return `${s} 秒前`;
+    if (s < 3600) return `${Math.floor(s / 60)} 分鐘前`;
+    if (s < 86400) return `${Math.floor(s / 3600)} 小時前`;
+    return `${Math.floor(s / 86400)} 天前`;
+  };
+  const highlight = (text) => {
+    const t = String(text == null ? "" : text);
+    if (!state.q) return esc(t);
+    const i = t.toLowerCase().indexOf(state.q.toLowerCase());
+    if (i < 0) return esc(t);
+    return esc(t.slice(0, i)) + `<mark class="hl">${esc(t.slice(i, i + state.q.length))}</mark>` + esc(t.slice(i + state.q.length));
+  };
+  const statusBadge = (n) => n.status === "online"
+    ? `<span class="badge b-ok">${icon("check")}在線</span>`
+    : `<span class="badge b-bad">${icon("x")}離線</span>`;
+  const chainBadge = (c) => {
+    if (!c || c.registered == null) return `<span class="badge b-plain">${icon("help")}未知</span>`;
+    if (!c.registered) return `<span class="badge b-bad">${icon("shield-off")}未註冊</span>`;
+    return c.active ? `<span class="badge b-ok">${icon("shield")}已註冊</span>`
+                    : `<span class="badge b-warn">${icon("alert")}已撤銷</span>`;
+  };
+  // 自動更新程式回報的 jar 版本：null＝沒裝自動更新（或還沒檢查過）
+  const shortMd5 = (m) => (m ? m.slice(0, 8) : "–");
+  const isOutdated = (n) => !!(n.version && !n.version.current);
+  const versionBadge = (v) => {
+    if (!v) return `<span class="badge b-plain">${icon("help")}未裝自動更新</span>`;
+    if (!v.md5) return `<span class="badge b-bad">${icon("x")}沒有 jar</span>`;
+    return v.current ? `<span class="badge b-ok">${icon("check")}最新版</span>`
+                     : `<span class="badge b-warn">${icon("alert")}舊版</span>`;
+  };
+  const resLabel = (k) => ({ computility: "CPU 分數", fileNameCount: "檔案數" }[k] || k);
+  const resValue = (k, v) => (k === "computility" && !isNaN(parseFloat(v)) ? parseFloat(v).toFixed(2) : v);
 
-  function chainChip(n, chainOk) {
-    if (!n.ek) return '<span class="chip warn" title="沒有 EK（未開 TPM 簽章或尚未收到簽章訊息）">無 EK</span>';
-    var c = n.chain || {};
-    if (!chainOk || c.registered == null) return '<span class="chip">鏈上未檢查</span>';
-    if (!c.registered) return '<span class="chip bad">未註冊</span>';
-    if (!c.active) return '<span class="chip bad">已撤銷</span>';
-    return '<span class="chip ok">已註冊</span>';
+  // ---------- tree model ----------
+  function buildTree(d) {
+    const byName = new Map(d.nodes.map((n) => [n.name, n]));
+    const children = new Map([[ROOT, []]]);
+    for (const n of d.nodes) {
+      const parent = n.broker && byName.has(n.broker) && n.broker !== n.name ? n.broker : ROOT;
+      if (!children.has(parent)) children.set(parent, []);
+      children.get(parent).push(n.name);
+    }
+    // Nodes caught in a parent cycle are unreachable from the root: hang them directly under it.
+    const reached = new Set([ROOT]);
+    const reach = (start) => {
+      const stack = [start];
+      while (stack.length) {
+        for (const c of children.get(stack.pop()) || []) if (!reached.has(c)) { reached.add(c); stack.push(c); }
+      }
+    };
+    reach(ROOT);
+    for (const n of d.nodes) {
+      if (reached.has(n.name)) continue;
+      for (const list of children.values()) { const i = list.indexOf(n.name); if (i >= 0) list.splice(i, 1); }
+      children.get(ROOT).push(n.name);
+      reached.add(n.name);
+      reach(n.name);
+    }
+    const rank = (n) => (n.role === "broker" ? 0 : 1) * 2 + (n.status === "online" ? 0 : 1);
+    for (const list of children.values()) {
+      list.sort((a, b) => rank(byName.get(a)) - rank(byName.get(b)) ||
+        a.localeCompare(b, undefined, { numeric: true }));
+    }
+    // Broker groups, numbered in tree order: a broker heads one group, its direct lower nodes are members.
+    const groups = new Map();
+    const seen = new Set();
+    const walk = (name) => {
+      for (const c of children.get(name) || []) {
+        if (seen.has(c)) continue;
+        seen.add(c);
+        if ((children.get(c) || []).length || byName.get(c).role === "broker") groups.set(c, groups.size);
+        walk(c);
+      }
+    };
+    walk(ROOT);
+    return { byName, children, groups };
   }
 
-  function resourceBlock(n, open) {
-    var keys = Object.keys(n.resources || {}).sort();
-    if (!keys.length) return "";
-    var rows = keys.map(function (k) {
-      return "<tr><th>" + esc(k) + '</th><td class="mono">' + esc(n.resources[k]) + "</td></tr>";
-    }).join("");
-    return '<details class="res"' + (open ? " open" : "") + "><summary>資源（" + keys.length + "）</summary>" +
-      '<div class="scroll"><table>' + rows + "</table></div></details>";
+  const GROUP_COLORS = 6;
+  const groupLetter = (i) => (i >= 26 ? groupLetter(Math.floor(i / 26) - 1) : "") + String.fromCharCode(65 + (i % 26));
+  const groupColor = (i) => `--gc: var(--g${i % GROUP_COLORS})`;
+  const groupTag = (i, head) =>
+    `<span class="gtag ${head ? "head" : ""}" style="${groupColor(i)}" title="${head ? "群組 " + groupLetter(i) + " 的 broker" : "屬於群組 " + groupLetter(i)}">${groupLetter(i)}</span>`;
+
+  function matches(n) {
+    if (state.filter !== "all" && n.status !== state.filter) return false;
+    if (!state.q) return true;
+    const q = state.q.toLowerCase();
+    return [n.name, n.ip, n.ek, n.broker].some((v) => v && String(v).toLowerCase().includes(q));
   }
 
-  function nodeRow(n, now, chainOk, openRes) {
-    var online = n.status === "online";
-    return '<div class="node' + (online ? "" : " offline") + '">' +
-      '<span class="dot' + (online ? " online" : "") + '" title="' + (online ? "在線" : "離線") + '"></span>' +
-      '<span class="name">' + esc(n.name) + "</span>" +
-      (n.role === "broker" ? '<span class="chip broker">broker</span>' : "") +
-      '<span class="mono muted">' + esc(n.ip || "-") + "</span>" +
-      (n.ek ? '<span class="mono muted" title="' + esc(n.ek) + '">EK ' + esc(shortEk(n.ek)) + "</span>" : "") +
-      chainChip(n, chainOk) +
-      '<span class="muted">' + (online ? "回報 " : "最後回報 ") + ago(n.lastSeen, now) + "</span>" +
-      resourceBlock(n, openRes) + "</div>";
+  // Visible = matches, or has a visible descendant (so the branch to it stays drawn).
+  function computeVisible(model) {
+    const visible = new Set();
+    const seen = new Set();
+    const walk = (name) => {
+      if (seen.has(name)) return false;
+      seen.add(name);
+      let any = false;
+      for (const c of model.children.get(name) || []) if (walk(c)) any = true;
+      const self = name === ROOT ? false : matches(model.byName.get(name));
+      if (self || any) visible.add(name);
+      return self || any;
+    };
+    walk(ROOT);
+    return visible;
   }
 
-  function renderTree(d) {
-    var now = d.generatedAt, chainOk = d.chainStatus && d.chainStatus.ok;
-    var showOff = el("show-offline").checked, openRes = el("show-res").checked;
-    var nodes = (d.nodes || []).filter(function (n) { return showOff || n.status === "online"; });
-    var byName = {}, kids = {};
-    nodes.forEach(function (n) { byName[n.name] = n; });
-    var roots = [];
-    nodes.forEach(function (n) {
-      if (n.broker && byName[n.broker] && n.broker !== n.name) {
-        (kids[n.broker] = kids[n.broker] || []).push(n);
+  function countSubtree(model, name) {
+    let total = 0, online = 0;
+    const seen = new Set();
+    const walk = (nm) => {
+      for (const c of model.children.get(nm) || []) {
+        if (seen.has(c)) continue;
+        seen.add(c);
+        total++;
+        if (model.byName.get(c).status === "online") online++;
+        walk(c);
+      }
+    };
+    walk(name);
+    return { total, online };
+  }
+
+  // ---------- render ----------
+  function renderTree() {
+    const d = state.data;
+    const model = buildTree(d);
+    if (state.view === "physical") { finishTree(physicalHtml(d, model)); return; }
+    const filtering = state.filter !== "all" || !!state.q;
+    const visible = filtering ? computeVisible(model) : null;
+    const now = d.generatedAt || Date.now();
+    const rendered = new Set();
+    const visibleKids = (name) => (model.children.get(name) || []).filter((c) => !visible || visible.has(c));
+    const stackLeaves = (kids) => kids.length >= 3 && kids.every((c) => visibleKids(c).length === 0);
+
+    const item = (name, level, parent) => {
+      if (rendered.has(name)) return "";
+      rendered.add(name);
+      const isRoot = name === ROOT;
+      const n = isRoot ? null : model.byName.get(name);
+      const kids = (model.children.get(name) || []).filter((c) => !visible || visible.has(c));
+      const hasKids = kids.length > 0;
+      const expanded = hasKids && (filtering || !state.collapsed.has(name));
+      const sub = countSubtree(model, name);
+      const selected = state.selected === name;
+
+      let card, label;
+      if (isRoot) {
+        label = `Accounting server，${sub.online}/${sub.total} 在線`;
+        card = `<div class="node root is-online">
+            <div class="node-h"><span class="kind root">${icon("server")}</span><span class="name">Accounting server</span></div>
+            <span class="mono">${esc(location.hostname)}</span>
+            <div class="node-f"><span class="badge b-ok">${icon("check")}運作中</span><span>${sub.online}/${sub.total} 在線</span></div>
+          </div>`;
       } else {
-        roots.push(n);
+        const broker = n.role === "broker";
+        const online = n.status === "online";
+        const own = model.groups.get(name);
+        const member = model.groups.get(parent);
+        const g = own != null ? own : member;
+        const groupText = [own != null ? `群組 ${groupLetter(own)} 的 broker` : "", member != null ? `屬於群組 ${groupLetter(member)}` : ""].filter(Boolean).join("，");
+        label = `${n.name}，${broker ? "Broker" : "節點"}，${online ? "在線" : "離線"}${groupText ? "，" + groupText : ""}${broker ? `，下層 ${sub.online}/${sub.total} 在線` : ""}`;
+        card = `<div class="node ${online ? "is-online" : "is-offline"}" ${g != null ? `data-g style="${groupColor(g)}"` : ""} title="${esc(online ? "回報於 " : "最後出現 ")}${esc(fmtTime(n.lastSeen))}">
+            <div class="node-h"><span class="kind ${broker ? "broker" : ""}">${icon(broker ? "network" : "cpu")}</span>
+              <span class="name">${highlight(n.name)}</span></div>
+            <div class="node-ip"><span class="mono">${highlight(n.ip || "–")}</span>${member != null ? groupTag(member, false) : ""}${own != null ? groupTag(own, true) : ""}</div>
+            <div class="node-f">${statusBadge(n)}${isOutdated(n) ? `<span class="badge b-warn" title="jar 與 accounting server 提供的版本不同">${icon("alert")}舊版</span>` : ""}<span>${broker ? `${sub.online}/${sub.total} 在線` : (online ? "" : ago(n.lastSeen, now))}</span></div>
+          </div>`;
       }
-    });
-    var seen = {};
-    function branch(n) {
-      if (seen[n.name]) return "";
-      seen[n.name] = true;
-      var children = (kids[n.name] || []).map(branch).join("");
-      return "<li>" + nodeRow(n, now, chainOk, openRes) + (children ? "<ul>" + children + "</ul>" : "") + "</li>";
-    }
-    var acctName = (d.accountingServer && d.accountingServer.name) || "accounting server";
-    var inner = roots.map(branch).join("");
-    el("tree").innerHTML = "<li><div class=\"node\"><span class=\"dot root\"></span>" +
-      '<span class="name">' + esc(acctName) + '</span><span class="chip">accounting server</span></div>' +
-      (inner ? "<ul>" + inner + "</ul>" : '<ul><li class="empty">' +
-        (showOff ? "還沒有任何 broker 回報" : "目前沒有在線節點（可勾選「顯示離線節點」）") + "</li></ul>") + "</li>";
+
+      // 展開中的 broker：用群組框把 broker 卡片和它的直屬下層一起圈起來
+      const boxed = !isRoot && hasKids && expanded && model.groups.has(name);
+      const fold = hasKids
+        ?`<button type="button" class="fold" data-toggle tabindex="-1" aria-hidden="true">${icon("chev")}${kids.length}</button>`
+        : "";
+      return `<li role="treeitem" data-name="${esc(name)}" aria-level="${level}" aria-label="${esc(label)}"
+                 aria-selected="${selected}" ${hasKids ? `aria-expanded="${expanded}"` : ""} tabindex="-1">
+          ${boxed ? `<div class="gbox" style="${groupColor(model.groups.get(name))}">` : ""}
+          ${card}${fold}
+          ${hasKids && expanded ? `<ul role="group" class="${stackLeaves(kids) ? "leaves" : ""}">${kids.map((c) => item(c, level + 1, name)).join("")}</ul>` : ""}
+          ${boxed ? "</div>" : ""}
+        </li>`;
+    };
+
+    let html = (filtering && visible.size === 0)
+      ? `<li class="tree-empty">沒有符合條件的節點</li>`
+      : item(ROOT, 1);
+    if (!d.nodes.length) html += `<li class="tree-empty">還沒有收到任何 broker 回報</li>`;
+    finishTree(html);
   }
 
-  function renderAlerts(d) {
-    var html = [];
-    var cs = d.chainStatus || {};
-    if (!cs.ok) {
-      html.push('<div class="alert bad">讀不到 TPMDeviceRegistry 鏈上資料：' + esc(cs.error || "未知錯誤") +
-        "。註冊狀態暫時無法判斷。</div>");
+  // ---------- physical view ----------
+  // 依 IP 前三段（/24，和 HiBA 找上層 broker 時的比對方式相同）把節點分成網段。
+  // 網段之間的上下關係由 broker 推得：網段裡的 broker 的上層 broker 在哪個網段，這個網段就在那個網段的路由器後面。
+  const subnetOf = (ip) => (/^\d+\.\d+\.\d+\.\d+$/.test(ip || "") ? ip.split(".").slice(0, 3).join(".") : null);
+  const NET = "net:";
+  const NO_IP = NET + "?";
+
+  function buildNetworks(d, model) {
+    const nets = new Map(); // key -> { key, nodes: [] }
+    const keyOf = (n) => (subnetOf(n.ip) ? NET + subnetOf(n.ip) : NO_IP);
+    for (const n of d.nodes) {
+      const k = keyOf(n);
+      if (!nets.has(k)) nets.set(k, { key: k, nodes: [] });
+      nets.get(k).nodes.push(n);
     }
-    // 同網段同時有多個最上層 broker：broker 合併機制應在幾秒內讓其中一方讓位
-    var groups = {};
-    (d.nodes || []).forEach(function (n) {
-      if (n.status === "online" && n.role === "broker" && !n.broker) {
-        var key = subnet(n.ip);
-        (groups[key] = groups[key] || []).push(n.name);
+    const acctNet = subnetOf(location.hostname);
+    const parentOf = new Map();
+    for (const net of nets.values()) {
+      if (net.key === NO_IP) continue;
+      const brokers = net.nodes.filter((n) => n.role === "broker")
+        .sort((a, b) => (a.status === "online" ? 0 : 1) - (b.status === "online" ? 0 : 1));
+      for (const b of brokers) {
+        const up = b.broker && model.byName.get(b.broker);
+        const k = up && keyOf(up);
+        if (k && k !== net.key && k !== NO_IP && nets.has(k)) { parentOf.set(net.key, k); break; }
       }
-    });
-    Object.keys(groups).forEach(function (net) {
-      if (groups[net].length > 1) {
-        html.push('<div class="alert">' + esc(net) + ".x 網段同時有 " + groups[net].length + " 個 broker：" +
-          esc(groups[net].join("、")) + "。若持續超過 30 秒，請檢查它們是否在同一個 multicast 網段。</div>");
-      }
-    });
-    el("alerts").innerHTML = html.join("");
+    }
+    const children = new Map([[ROOT, []]]);
+    for (const net of nets.values()) {
+      const p = parentOf.get(net.key) || ROOT;
+      if (!children.has(p)) children.set(p, []);
+      children.get(p).push(net.key);
+    }
+    // 循環（例如兩台 broker 上下互換的那幾秒）從根走不到：掛到最上層
+    const reached = new Set([ROOT]);
+    const reach = (s) => { const st = [s]; while (st.length) for (const c of children.get(st.pop()) || []) if (!reached.has(c)) { reached.add(c); st.push(c); } };
+    reach(ROOT);
+    for (const k of nets.keys()) {
+      if (reached.has(k)) continue;
+      for (const list of children.values()) { const i = list.indexOf(k); if (i >= 0) list.splice(i, 1); }
+      children.get(ROOT).push(k); parentOf.delete(k); reached.add(k); reach(k);
+    }
+    const ipNum = (k) => k.slice(NET.length).split(".").reduce((a, x) => a * 256 + (Number(x) || 0), 0);
+    for (const list of children.values()) list.sort((a, b) => (a === NO_IP) - (b === NO_IP) || ipNum(a) - ipNum(b));
+    for (const net of nets.values()) {
+      net.nodes.sort((a, b) => (a.role === "broker" ? 0 : 1) - (b.role === "broker" ? 0 : 1) ||
+        a.name.localeCompare(b.name, undefined, { numeric: true }));
+    }
+    return { nets, children, parentOf, acctNet };
   }
 
-  function renderStepDowns(d) {
-    var list = d.stepDowns || [];
-    if (!list.length) {
-      el("stepdowns").innerHTML = '<div class="empty">還沒有 broker 讓位過。</div>';
+  function physicalHtml(d, model) {
+    const pm = buildNetworks(d, model);
+    const filtering = state.filter !== "all" || !!state.q;
+    const memberGroup = new Map();
+    for (const [p, list] of model.children) if (model.groups.has(p)) for (const c of list) memberGroup.set(c, model.groups.get(p));
+    const shownNodes = (net) => net.nodes.filter((n) => !filtering || matches(n));
+    const visible = new Set();
+    const vis = (k) => {
+      let any = false;
+      for (const c of pm.children.get(k) || []) if (vis(c)) any = true;
+      const self = k !== ROOT && shownNodes(pm.nets.get(k)).length > 0;
+      if (self || any || !filtering) visible.add(k);
+      return self || any || !filtering;
+    };
+    vis(ROOT);
+
+    const row = (n) => {
+      const own = model.groups.get(n.name);
+      const mem = memberGroup.get(n.name);
+      const ip = n.ip || "–";
+      return `<div role="listitem"><button type="button" class="pn ${n.status === "online" ? "" : "off"}" data-node="${esc(n.name)}"
+          aria-current="${state.selected === n.name}" tabindex="-1"
+          aria-label="${esc(`${n.name}，${n.role === "broker" ? "Broker" : "節點"}，${n.status === "online" ? "在線" : "離線"}，${ip}`)}">
+          <span class="dot" aria-hidden="true"></span>
+          <span class="kind ${n.role === "broker" ? "broker" : ""}" style="width:22px;height:22px">${icon(n.role === "broker" ? "network" : "cpu")}</span>
+          <span class="pn-text"><span class="pn-name">${highlight(n.name)}</span><span class="mono">${highlight(ip)}</span></span>
+          ${mem != null ? groupTag(mem, false) : ""}${own != null ? groupTag(own, true) : ""}</button></div>`;
+    };
+
+    const item = (k, level, parentKey) => {
+      if (k === ROOT) {
+        const kids = (pm.children.get(ROOT) || []).filter((c) => visible.has(c));
+        const online = d.nodes.filter((n) => n.status === "online").length;
+        return `<li role="treeitem" data-name="${ROOT}" aria-level="1" aria-selected="${state.selected === ROOT}"
+            aria-label="${esc(`Accounting server，${pm.nets.size} 個網段`)}" ${kids.length ? 'aria-expanded="true"' : ""} tabindex="-1">
+            <div class="node root is-online">
+              <div class="node-h"><span class="kind root">${icon("server")}</span><span class="name">Accounting server</span></div>
+              <span class="mono">${esc(location.hostname)}</span>
+              <div class="node-f"><span class="badge b-ok">${icon("check")}運作中</span><span>${pm.nets.size} 個網段・${online}/${d.nodes.length} 在線</span></div>
+            </div>
+            ${kids.length ? `<ul role="group">${kids.map((c) => item(c, 2, ROOT)).join("")}</ul>` : ""}</li>`;
+      }
+      const net = pm.nets.get(k);
+      const kids = (pm.children.get(k) || []).filter((c) => visible.has(c));
+      const shown = shownNodes(net);
+      const online = net.nodes.filter((n) => n.status === "online").length;
+      const head = net.nodes.find((n) => n.role === "broker" && model.groups.has(n.name));
+      const g = head ? model.groups.get(head.name) : null;
+      const title = k === NO_IP ? "IP 不明" : `${k.slice(NET.length)}.0/24`;
+      const hasAcct = k !== NO_IP && pm.acctNet === k.slice(NET.length);
+      const link = parentKey === ROOT
+        ? (hasAcct ? `<span class="link">${icon("lan")}同網段</span>`
+                   : `<span class="link" title="和 accounting server 不在同一個網段，經上游網路連線">${icon("globe")}上游網路</span>`)
+        : `<span class="link router" title="依 broker 上下層推得：這個網段在上一個網段的路由器（NAT）後面">${icon("router")}路由器</span>`;
+      const rows = [
+        hasAcct ? `<div role="listitem"><div class="pn acct" aria-label="Accounting server"><span class="dot" aria-hidden="true"></span>
+            <span class="kind root" style="width:22px;height:22px">${icon("server")}</span><span class="pn-text"><span class="pn-name">Accounting server</span>
+            <span class="mono">${esc(location.hostname)}</span></span></div></div>` : "",
+        ...shown.map(row),
+      ].join("");
+      const hidden = net.nodes.length - shown.length;
+      return `<li role="treeitem" data-name="${esc(k)}" aria-level="${level}" aria-selected="${state.selected === k}"
+          aria-label="${esc(`網段 ${title}，${online}/${net.nodes.length} 在線`)}" ${kids.length ? 'aria-expanded="true"' : ""} tabindex="-1">
+          ${link}
+          <div class="node subnet ${online ? "is-online" : "is-offline"}" ${g != null ? `data-g style="${groupColor(g)}"` : ""}>
+            <div class="node-h"><span class="kind">${icon("lan")}</span><span class="name">${esc(title)}</span>
+              <span class="muted small" style="margin-left:auto">${online}/${net.nodes.length} 在線</span></div>
+            <div class="subnet-rows" role="list">${rows}</div>
+            ${hidden ? `<div class="subnet-more">另有 ${hidden} 台不符合篩選</div>` : ""}
+          </div>
+          ${kids.length ? `<ul role="group">${kids.map((c) => item(c, level + 1, k)).join("")}</ul>` : ""}</li>`;
+    };
+
+    if (!d.nodes.length) return item(ROOT, 1) + `<li class="tree-empty">還沒有收到任何 broker 回報</li>`;
+    if (filtering && visible.size <= 1) return `<li class="tree-empty">沒有符合條件的節點</li>`;
+    return item(ROOT, 1);
+  }
+
+  function renderNetDetail(k) {
+    const d = state.data;
+    const model = buildTree(d);
+    const pm = buildNetworks(d, model);
+    const net = pm.nets.get(k);
+    if (!net) { $("detail").innerHTML = `<p class="detail-empty">點一個節點查看詳細資料。</p>`; return; }
+    const title = k === NO_IP ? "IP 不明" : `${k.slice(NET.length)}.0/24`;
+    const up = pm.parentOf.get(k);
+    const lower = pm.children.get(k) || [];
+    const brokers = net.nodes.filter((n) => n.role === "broker");
+    const netName = (x) => `${x.slice(NET.length)}.0/24`;
+    $("detail").innerHTML = `
+      <dl class="dl">
+        <dt>網段</dt><dd class="mono"><strong>${esc(title)}</strong></dd>
+        <dt>節點</dt><dd>${net.nodes.length} 台（${net.nodes.filter((n) => n.status === "online").length} 台在線）</dd>
+        <dt>Broker</dt><dd>${brokers.length ? brokers.map((b) => esc(b.name)).join("、") : "–"}</dd>
+        <dt>上游</dt><dd>${up ? `${esc(netName(up))} 的路由器後面` : (pm.acctNet && k === NET + pm.acctNet ? "和 accounting server 同網段" : "直接連到 accounting server（經上游網路）")}</dd>
+        <dt>下游網段</dt><dd>${lower.length ? lower.map((x) => `<span class="mono">${esc(x === NO_IP ? "IP 不明" : netName(x))}</span>`).join("、") : "–"}</dd>
+        <dt>說明</dt><dd class="muted small">網段依 IP 前三段分組；網段之間的路由器位置是由 broker 上下層推得，不是實際掃描路由器的結果。</dd>
+      </dl>`;
+  }
+
+  function finishTree(html) {
+    const hadFocus = $("tree").contains(document.activeElement);
+    $("tree").innerHTML = html;
+
+    // roving tabindex: exactly one item reachable with Tab
+    const items = treeItems();
+    const target = items.find((el) => el.dataset.name === state.focused) ||
+                   items.find((el) => el.dataset.name === state.selected) ||
+                   items.find((el) => Array.from(el.querySelectorAll(":scope > .node [data-node]")).some((b) => b.dataset.node === state.selected)) ||
+                   items[0];
+    if (target) {
+      target.tabIndex = 0;
+      if (hadFocus) target.focus({ preventScroll: true });
+    }
+    if (!state.centered && items.length) { centerOn(items[0], false); state.centered = true; }
+  }
+
+  function groupRows(n) {
+    const model = buildTree(state.data);
+    const own = model.groups.get(n.name);
+    const parent = Array.from(model.children.entries()).find(([, list]) => list.includes(n.name));
+    const member = parent ? model.groups.get(parent[0]) : undefined;
+    const rows = [];
+    if (own != null) rows.push(`<div class="gname">${groupTag(own, true)}群組 ${groupLetter(own)} 的 broker</div>`);
+    if (member != null) rows.push(`<div class="gname">${groupTag(member, false)}群組 ${groupLetter(member)} 的成員</div>`);
+    return rows.join("") || "–";
+  }
+
+  function renderDetail() {
+    if (state.selected && state.selected.startsWith(NET)) { renderNetDetail(state.selected); return; }
+    const d = state.data;
+    const n = state.selected && state.selected !== ROOT ? d.nodes.find((x) => x.name === state.selected) : null;
+    if (!n) {
+      $("detail").innerHTML = state.selected === ROOT
+        ? `<dl class="dl"><dt>角色</dt><dd>Accounting server</dd><dt>位址</dt><dd class="mono">${esc(location.host)}</dd>
+             <dt>說明</dt><dd>彙整所有 broker 的回報，${d.onlineTimeoutMs / 1000} 秒沒回報即視為離線。</dd>
+             <dt>提供的 jar</dt><dd class="mono">${esc((d.dist && d.dist.md5) || "沒有（節點無法自動更新）")}</dd></dl>`
+        : `<p class="detail-empty">點一個節點查看詳細資料。</p>`;
       return;
     }
-    el("stepdowns").innerHTML = "<table><thead><tr><th>時間</th><th>讓位的 broker</th><th>勝出的 broker</th></tr></thead><tbody>" +
-      list.map(function (s) {
-        return "<tr><td>" + esc(clock(s.time)) + '<div class="muted">' + ago(s.time, d.generatedAt) + "</div></td>" +
-          "<td>" + esc(s.broker) + ' <span class="mono muted">' + esc(s.brokerIp || "") + "</span></td>" +
-          "<td>" + esc(s.winner) + ' <span class="mono muted">' + esc(s.winnerIp || "") + "</span></td></tr>";
-      }).join("") + "</tbody></table>";
+    const now = d.generatedAt || Date.now();
+    const res = Object.keys(n.resources || {}).sort();
+    const c = n.chain || {};
+    $("detail").innerHTML = `
+      <dl class="dl">
+        <dt>名稱</dt><dd><strong>${esc(n.name)}</strong></dd>
+        <dt>狀態</dt><dd>${statusBadge(n)}</dd>
+        <dt>角色</dt><dd>${n.role === "broker" ? `Broker（${n.status === "online" ? n.lowerNodeCount + " 個直屬下層" : "離線"}）` : "節點"}</dd>
+        <dt>上層</dt><dd>${esc(n.broker || "Accounting server")}</dd>
+        <dt>群組</dt><dd>${groupRows(n)}</dd>
+        <dt>IP</dt><dd class="mono">${esc(n.ip || "–")}</dd>
+        <dt>最後出現</dt><dd>${ago(n.lastSeen, now)}<div class="muted small">${esc(fmtTime(n.lastSeen))}</div></dd>
+        <dt>首次出現</dt><dd>${esc(fmtTime(n.firstSeen))}</dd>
+        <dt>資源</dt><dd>${res.length ? `<span class="chips">${res.map((k) =>
+            `<span class="chip">${esc(resLabel(k))} ${esc(resValue(k, n.resources[k]))}</span>`).join("")}</span>` : "–"}</dd>
+        <dt>鏈上註冊</dt><dd>${chainBadge(c)}${c.registeredAt ? `<div class="muted small">${esc(fmtTime(c.registeredAt * 1000))} 註冊</div>` : ""}</dd>
+        <dt>版本</dt><dd>${versionBadge(n.version)}${n.version ? `<div class="muted small"><span class="mono">${esc(shortMd5(n.version.md5))}</span>，${n.version.running ? "HiBA 執行中" : "HiBA 未執行"}，${ago(n.version.checkedAt, now)}檢查</div>` : ""}</dd>
+        <dt>EK</dt><dd class="mono">${esc(n.ek || "未回報（未啟用 TPM 簽章）")}</dd>
+      </dl>
+      ${n.status === "online" ? "" : `<div class="detail-actions">
+        <button class="btn danger" type="button" id="forget">${icon("trash")}從節點表移除</button>
+        <p class="muted small" style="margin:8px 0 0">移除後若它再次回報，會重新出現。</p></div>`}`;
+    const f = $("forget");
+    if (f) f.addEventListener("click", () => forget(n.name, f));
   }
 
-  function renderChain(d) {
-    var cs = d.chainStatus || {};
-    var head = '<div class="muted">' + (cs.ok
-      ? "合約共 " + cs.deviceCount + " 台已註冊裝置，上次讀取 " + ago(cs.fetchedAt, d.generatedAt) + "（每 60 秒）。"
-      : "鏈上資料不可用" + (cs.fetchedAt ? "，以下為 " + ago(cs.fetchedAt, d.generatedAt) + " 的資料" : "") + "。") + "</div>";
-    var never = d.registeredNeverSeen || [];
-    var body = never.length
-      ? '<div class="scroll"><table><thead><tr><th>已註冊但從未出現的 EK</th><th>狀態</th></tr></thead><tbody>' +
-        never.map(function (x) {
-          return '<tr><td class="mono">' + esc(x.ek) + "</td><td>" +
-            (x.active ? '<span class="chip ok">啟用</span>' : '<span class="chip bad">已撤銷</span>') + "</td></tr>";
-        }).join("") + "</tbody></table></div>"
-      : '<div class="empty">所有已註冊的裝置都出現過。</div>';
-    el("chain").innerHTML = head + body;
+  function renderNever() {
+    const d = state.data;
+    const list = d.registeredNeverSeen;
+    $("never-count").textContent = d.chainStatus.ok ? `${list.length} 台` : "";
+    $("never").innerHTML = list.length ? list.map((x) => `
+        <li>${icon("key")}<span class="mono">${esc(x.ek)}</span>
+          ${x.active ? `<span class="badge b-ok">${icon("shield")}啟用</span>` : `<span class="badge b-warn">${icon("alert")}已撤銷</span>`}
+          <span class="muted small">${x.registeredAt ? esc(fmtTime(x.registeredAt * 1000)) + " 註冊" : ""}</span></li>`).join("")
+      : `<li class="muted">${d.chainStatus.ok ? "沒有，所有已註冊設備都出現過。" : "無法讀取區塊鏈。"}</li>`;
   }
 
-  function render(d) {
-    last = d;
-    var s = d.summary || {};
-    el("acct").textContent = "accounting server：" + ((d.accountingServer && d.accountingServer.name) || "-");
-    el("t-total").textContent = s.total;
-    el("t-online").textContent = s.online;
-    el("t-brokers").textContent = s.brokers;
-    el("t-never").textContent = s.registeredNeverSeen;
-    el("timeout").textContent = Math.round((d.onlineTimeoutMs || 15000) / 1000);
-    renderAlerts(d);
-    renderTree(d);
-    renderStepDowns(d);
-    renderChain(d);
-    el("updated").textContent = "更新於 " + clock(d.generatedAt);
+  function renderStepDowns() {
+    const d = state.data;
+    const list = d.stepDowns || [];
+    const now = d.generatedAt || Date.now();
+    $("stepdown-count").textContent = list.length ? `${list.length} 筆` : "";
+    $("stepdowns").innerHTML = list.length ? list.map((s) => `
+        <li>${icon("network")}<span class="sd"><strong>${esc(s.broker)}</strong>
+            <span class="mono muted small">${esc(s.brokerIp || "")}</span>
+            讓位給 <strong>${esc(s.winner)}</strong>
+            <span class="mono muted small">${esc(s.winnerIp || "")}</span></span>
+          <span class="muted small">${esc(fmtTime(s.time))}（${ago(s.time, now)}）</span></li>`).join("")
+      : `<li class="muted">還沒有 broker 讓位過。同網段出現兩個 broker 時，分數低的一方會讓位並記在這裡。</li>`;
   }
 
-  function load() {
-    fetch("/api/nodes", { cache: "no-store" })
-      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
-      .then(render)
-      .catch(function (e) {
-        el("updated").textContent = "更新失敗（" + e.message + "），稍後重試";
-      })
-      .then(function () { setTimeout(load, REFRESH_MS); });
+  function renderAll() {
+    const d = state.data;
+    if (!d) return;
+    $("c-total").textContent = d.summary.total;
+    $("c-online").textContent = d.summary.online;
+    $("c-offline").textContent = d.summary.offline;
+    $("c-never").textContent = d.summary.registeredNeverSeen;
+    renderTree();
+    renderDetail();
+    renderNever();
+    renderStepDowns();
+    const cs = d.chainStatus;
+    const outdated = d.nodes.filter(isOutdated).length;
+    $("chain").textContent = (cs.ok
+      ? `TPMDeviceRegistry 共 ${cs.registeredTotal} 台已註冊設備，${fmtTime(cs.fetchedAt)} 同步（每 60 秒）。離線判定：超過 ${d.onlineTimeoutMs / 1000} 秒沒有回報。`
+      : `TPMDeviceRegistry 讀取失敗${cs.error ? "：" + cs.error : "（尚未同步）"}`) +
+      ` 目前提供的 jar：${shortMd5(d.dist && d.dist.md5)}${outdated ? `，${outdated} 台是舊版` : ""}。`;
+    renderBanner();
   }
 
-  ["show-offline", "show-res"].forEach(function (id) {
-    var box = el(id);
-    box.checked = prefGet("hiba." + id);
-    box.addEventListener("change", function () {
-      prefSet("hiba." + id, box.checked);
-      if (last) renderTree(last);
+  function renderBanner() {
+    const d = state.data;
+    let html = "";
+    if (state.error) html = `${icon("alert")}<span>無法取得節點資料（${esc(state.error)}），持續重試中。</span>`;
+    else if (d && !d.accountingServer) html = `${icon("alert")}<span>這台不是 accounting server，沒有節點總表。請改開 accounting server 的這個頁面。</span>`;
+    else if (d && !d.chainStatus.ok && d.chainStatus.error) html = `${icon("alert")}<span>區塊鏈讀取失敗，「鏈上註冊」暫時無法判斷。</span>`;
+    else if (d) {
+      const groups = {};
+      d.nodes.filter((n) => n.status === "online" && n.role === "broker" && !n.broker).forEach((n) => {
+        const net = (n.ip || "").split(".").slice(0, 3).join(".");
+        (groups[net] = groups[net] || []).push(n.name);
+      });
+      const dup = Object.keys(groups).filter((k) => groups[k].length > 1);
+      if (dup.length) html = `${icon("alert")}<span>${dup.map((k) => `${esc(k)}.x 網段同時有 ${groups[k].length} 個 broker（${esc(groups[k].join("、"))}）`).join("；")}。正常情況下幾秒內會有一方讓位；持續存在請確認它們是否在同一個 multicast 網段。</span>`;
+    }
+    const b = $("banner");
+    b.className = "banner " + (state.error ? "err" : "warn");
+    b.innerHTML = html;
+  }
+
+  // ---------- data ----------
+  async function fetchOnce() {
+    try {
+      const r = await fetch("/api/nodes", { cache: "no-store" });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      state.data = await r.json();
+      state.error = null;
+      $("updated").textContent = `更新於 ${fmtTime(Date.now())}`;
+    } catch (e) {
+      state.error = e.message || String(e);
+    }
+    if (state.data) renderAll(); else renderBanner();
+  }
+  let timer = null;
+  function schedule() {
+    clearTimeout(timer);
+    if (!state.paused) timer = setTimeout(async () => { await fetchOnce(); schedule(); }, REFRESH_MS);
+  }
+
+  async function forget(name, btn) {
+    if (!confirm(`從節點表移除「${name}」？若它再次回報會重新出現。`)) return;
+    btn.disabled = true;
+    try {
+      const r = await fetch("/api/nodes/" + encodeURIComponent(name), { method: "DELETE" });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      state.selected = null;
+    } catch (e) {
+      alert("移除失敗：" + (e.message || e));
+      btn.disabled = false;
+    }
+    await fetchOnce();
+  }
+
+  // ---------- canvas: centering & drag-to-pan ----------
+  const canvas = $("canvas");
+  function centerOn(li, smooth) {
+    if (!li) return;
+    const card = li.querySelector(".node") || li;
+    const c = canvas.getBoundingClientRect();
+    const r = card.getBoundingClientRect();
+    canvas.scrollTo({
+      left: canvas.scrollLeft + (r.left + r.width / 2) - (c.left + c.width / 2),
+      top: canvas.scrollTop + (r.top - c.top) - 24,
+      behavior: smooth && !reduceMotion() ? "smooth" : "auto",
     });
+  }
+  function revealItem(li) {
+    const card = li && li.querySelector(".node");
+    if (card) card.scrollIntoView({ block: "nearest", inline: "nearest", behavior: reduceMotion() ? "auto" : "smooth" });
+  }
+  let drag = null;
+  canvas.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || e.pointerType === "touch" || e.target.closest(".node, .fold")) return;
+    drag = { x: e.clientX, y: e.clientY, left: canvas.scrollLeft, top: canvas.scrollTop };
+    canvas.setPointerCapture(e.pointerId);
+    canvas.classList.add("dragging");
   });
-  load();
+  canvas.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    canvas.scrollLeft = drag.left - (e.clientX - drag.x);
+    canvas.scrollTop = drag.top - (e.clientY - drag.y);
+  });
+  const endDrag = () => { drag = null; canvas.classList.remove("dragging"); };
+  canvas.addEventListener("pointerup", endDrag);
+  canvas.addEventListener("pointercancel", endDrag);
+
+  // ---------- interaction ----------
+  const treeItems = () => Array.from($("tree").querySelectorAll('[role="treeitem"]'));
+  const persistCollapsed = () => store.set("hiba.tree.collapsed", Array.from(state.collapsed));
+  const itemByName = (name) => treeItems().find((el) => el.dataset.name === name);
+
+  function setExpanded(name, expand) {
+    if (expand) state.collapsed.delete(name); else state.collapsed.add(name);
+    persistCollapsed();
+    renderTree();
+  }
+  function focusItem(el) {
+    if (!el) return;
+    treeItems().forEach((x) => (x.tabIndex = -1));
+    el.tabIndex = 0;
+    el.focus({ preventScroll: true });
+    revealItem(el);
+    state.focused = el.dataset.name;
+  }
+  function select(name) {
+    state.selected = name;
+    state.focused = name;
+    renderTree();
+    renderDetail();
+    if (window.matchMedia("(max-width: 1279px)").matches) {
+      $("detail").closest(".detail").scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "start" });
+    }
+  }
+
+  $("tree").addEventListener("click", (e) => {
+    const li = e.target.closest('[role="treeitem"]');
+    if (!li) return;
+    const name = li.dataset.name;
+    const pn = e.target.closest("[data-node]");
+    if (pn) { select(pn.dataset.node); return; }
+    if (e.target.closest("[data-toggle]")) {
+      state.focused = name;
+      setExpanded(name, li.getAttribute("aria-expanded") !== "true");
+      return;
+    }
+    if (e.target.closest(".node")) select(name);
+  });
+
+  $("tree").addEventListener("keydown", (e) => {
+    const li = e.target.closest('[role="treeitem"]');
+    if (!li) return;
+    const name = li.dataset.name;
+    const exp = li.getAttribute("aria-expanded");
+    const parent = li.parentElement.closest('[role="treeitem"]');
+    const siblings = Array.from(li.parentElement.children).filter((x) => x.matches('[role="treeitem"]'));
+    const si = siblings.indexOf(li);
+    switch (e.key) {
+      case "ArrowDown":           // into the branch
+        if (exp === "false") { state.focused = name; setExpanded(name, true); }
+        focusItem(itemByName(name).querySelector('[role="treeitem"]'));
+        break;
+      case "ArrowUp": focusItem(parent); break;
+      case "ArrowLeft": focusItem(siblings[si - 1]); break;
+      case "ArrowRight": focusItem(siblings[si + 1]); break;
+      case "Home": focusItem(treeItems()[0]); break;
+      case "End": { const all = treeItems(); focusItem(all[all.length - 1]); break; }
+      case "-": if (exp === "true") { state.focused = name; setExpanded(name, false); } break;
+      case "+": if (exp === "false") { state.focused = name; setExpanded(name, true); } break;
+      case "Enter": case " ": select(name); break;
+      default: return;
+    }
+    e.preventDefault();
+  });
+
+  document.querySelectorAll(".seg [data-filter]").forEach((b) => b.addEventListener("click", () => {
+    state.filter = b.dataset.filter;
+    document.querySelectorAll(".seg [data-filter]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    if (state.data) renderTree();
+  }));
+  const HINTS = {
+    logical: "↑ 上層・↓ 下層・←→ 同層・+/− 展開收合・Enter 查看・拖曳空白處平移",
+    physical: "依 IP 網段（/24）分組・路由器位置由 broker 上下層推得・點節點查看・拖曳空白處平移",
+  };
+  function applyView() {
+    document.querySelectorAll(".seg [data-view]").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.view === state.view)));
+    $("tree-title").textContent = state.view === "physical" ? "實體網路拓撲" : "Broker 階層";
+    $("tree-hint").textContent = HINTS[state.view];
+    $("expand-all").hidden = $("collapse-all").hidden = state.view === "physical";
+  }
+  document.querySelectorAll(".seg [data-view]").forEach((b) => b.addEventListener("click", () => {
+    if (state.view === b.dataset.view) return;
+    state.view = b.dataset.view;
+    store.set("hiba.tree.view", state.view);
+    if (state.view === "logical" && state.selected && state.selected.startsWith(NET)) state.selected = null;
+    state.focused = null;
+    state.centered = false;
+    applyView();
+    if (state.data) { renderTree(); renderDetail(); }
+  }));
+  applyView();
+  $("q").addEventListener("input", (e) => { state.q = e.target.value.trim(); if (state.data) renderTree(); });
+  $("center").addEventListener("click", () => centerOn(treeItems()[0], true));
+  $("expand-all").addEventListener("click", () => { state.collapsed.clear(); persistCollapsed(); if (state.data) renderTree(); });
+  $("collapse-all").addEventListener("click", () => {
+    if (!state.data) return;
+    const model = buildTree(state.data);
+    state.collapsed = new Set(Array.from(model.children.keys()).filter((k) => k !== ROOT && model.children.get(k).length));
+    persistCollapsed();
+    renderTree();
+    centerOn(treeItems()[0], true);
+  });
+  $("pause").addEventListener("click", () => {
+    state.paused = !state.paused;
+    const b = $("pause");
+    b.setAttribute("aria-pressed", String(state.paused));
+    b.innerHTML = state.paused ? `${icon("play")}<span>繼續更新</span>` : `${icon("pause")}<span>暫停更新</span>`;
+    $("live").classList.toggle("paused", state.paused);
+    if (state.paused) clearTimeout(timer); else { fetchOnce(); schedule(); }
+  });
+
+  fetchOnce().then(schedule);
 })();
 </script>
 </body>

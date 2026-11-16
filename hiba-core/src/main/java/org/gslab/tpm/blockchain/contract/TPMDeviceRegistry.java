@@ -203,6 +203,31 @@ public class TPMDeviceRegistry extends Contract {
         });
     }
 
+    /** getDeviceInfo 的回傳值；registeredAt 為區塊時間（秒） */
+    public record DeviceInfo(String publicKey, BigInteger registeredAt, boolean active, String metadata) {}
+
+    /**
+     * 取得設備的註冊資訊（未註冊的 EK 會被合約 revert）
+     */
+    public RemoteFunctionCall<DeviceInfo> getDeviceInfo(String ekFingerprint) {
+        final Function function = new Function(
+                "getDeviceInfo",
+                Arrays.<Type>asList(new Utf8String(ekFingerprint)),
+                Arrays.<TypeReference<?>>asList(
+                        new TypeReference<Utf8String>() {},
+                        new TypeReference<Uint256>() {},
+                        new TypeReference<Bool>() {},
+                        new TypeReference<Utf8String>() {}));
+        return new RemoteFunctionCall<>(function, () -> {
+            List<Type> results = executeCallMultipleValueReturn(function);
+            return new DeviceInfo(
+                    (String) results.get(0).getValue(),
+                    (BigInteger) results.get(1).getValue(),
+                    Boolean.TRUE.equals(results.get(2).getValue()),
+                    (String) results.get(3).getValue());
+        });
+    }
+
     // ============ 設備管理功能 ============
 
     /**

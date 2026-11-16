@@ -4,6 +4,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -16,6 +17,7 @@ import java.util.concurrent.TimeUnit;
 import org.gslab.message_hiba.BrokerStepDownNotice;
 import org.gslab.message_hiba.NodeStatusReport;
 import org.gslab.tpm.blockchain.Web3BlockchainService;
+import org.gslab.tpm.blockchain.contract.TPMDeviceRegistry;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.slf4j.Logger;
@@ -29,6 +31,7 @@ import org.slf4j.LoggerFactory;
  * <li>各 broker 每 5 秒送來的 {@link NodeStatusReport}（broker 自己與底下的節點）</li>
  * <li>broker 讓位時送來的 {@link BrokerStepDownNotice}</li>
  * <li>每 60 秒從 TPMDeviceRegistry 合約讀一次已註冊的 EK 清單</li>
+ * <li>節點自動更新程式檢查新版時回報的 jar 版本（{@link #onVersionCheck}）</li>
  * </ul>
  * 只在 accounting server 上啟用（{@link #enable}）；其他節點呼叫任何方法都不會有作用。
  * </p>
@@ -42,16 +45,25 @@ public final class NodeStatusRegistry {
 
     private static final long CHAIN_REFRESH_SEC = 60;
     private static final int MAX_STEP_DOWN_RECORDS = 100;
+    private static final int MAX_VERSION_RECORDS = 1000; // 防止亂打 /dist/...md5?node= 把記憶體塞滿
     private static final NodeStatusRegistry INSTANCE = new NodeStatusRegistry();
+
+    /** {@link #forget} 的結果 */
+    public enum ForgetResult {
+        REMOVED,
+        NOT_FOUND,
+        STILL_ONLINE
+    }
 
     private volatile boolean enabled = false;
     private volatile String accountingServerName = "";
 
     private final Map<String, NodeRecord> nodes = new ConcurrentHashMap<>(); // nodeName → 最後一次看到的資料
     private final Deque<JSONObject> stepDowns = new ArrayDeque<>(); // 新的在前，存取時要 synchronized
+    private final Map<String, VersionRecord> versions = new ConcurrentHashMap<>(); // nodeName → 最後一次回報的版本
 
     private volatile Web3BlockchainService chain;
-    private volatile Map<String, Boolean> chainDevices = Map.of(); // EK → 是否啟用（未撤銷）
+    private volatile Map<String, TPMDeviceRegistry.DeviceInfo> chainDevices = Map.of(); // EK → 鏈上註冊資訊
     private volatile boolean chainOk = false;
     private volatile String chainError = "尚未讀取";
     private volatile long chainFetchedAt = 0;
@@ -126,6 +138,39 @@ public final class NodeStatusRegistry {
     }
 
     /**
+     * 節點自動更新程式（hiba_autoupdate.sh）檢查新版時回報自己的 jar 版本。
+     *
+     * @param md5 節點目前的 jar md5（沒有 jar 時為空）
+     * @param running 節點上的 HiBA 是否在執行
+     */
+    public void onVersionCheck(String name, String md5, boolean running, String remoteIp) {
+        if (!enabled || name == null || name.isBlank() || name.length() > 128) {
+            return;
+        }
+        if (!versions.containsKey(name) && versions.size() >= MAX_VERSION_RECORDS) {
+            return;
+        }
+        String cleanMd5 = md5 != null && md5.matches("[0-9a-f]{32}") ? md5 : null;
+        versions.put(name, new VersionRecord(cleanMd5, running, System.currentTimeMillis(), remoteIp));
+    }
+
+    /** 從節點表移除一台離線的節點（頁面上的「從節點表移除」）。在線的節點不能移除。 */
+    public ForgetResult forget(String name) {
+        long now = System.currentTimeMillis();
+        NodeRecord r = nodes.get(name);
+        if (r == null) {
+            return ForgetResult.NOT_FOUND;
+        }
+        if (now - r.lastSeen() <= ONLINE_TIMEOUT_MS) {
+            return ForgetResult.STILL_ONLINE;
+        }
+        nodes.remove(name, r);
+        versions.remove(name);
+        logger.atInfo().log("Node {} removed from the node status table.", name);
+        return ForgetResult.REMOVED;
+    }
+
+    /**
      * @param listedBy 列出這台的 broker；null 表示這是 broker 自己的報告。
      *     多層架構裡下層 broker 同時會「自己報告」又被上層 broker「列為下層」，
      *     所以兩種時間分開記，輸出時才決定角色與上層（見 {@link NodeRecord}）。
@@ -135,7 +180,7 @@ public final class NodeStatusRegistry {
             return;
         }
         nodes.compute(entry.getName(), (name, old) -> {
-            NodeRecord r = old == null ? new NodeRecord(name) : old;
+            NodeRecord r = old == null ? new NodeRecord(name, now) : old;
             if (listedBy == null) {
                 r.lastBrokerReport = now;
             } else {
@@ -183,11 +228,21 @@ public final class NodeStatusRegistry {
 
     public JSONObject toJson() {
         long now = System.currentTimeMillis();
-        Map<String, Boolean> devices = chainDevices;
+        Map<String, TPMDeviceRegistry.DeviceInfo> devices = chainDevices;
         boolean ok = chainOk;
+        String distMd5 = DistJar.md5();
 
         List<NodeRecord> list = new ArrayList<>(nodes.values());
         list.sort(Comparator.comparing((NodeRecord r) -> !r.isBroker(now)).thenComparing(r -> r.name));
+
+        // 每個 broker 目前在線的直屬下層數
+        Map<String, Integer> lowerCount = new HashMap<>();
+        for (NodeRecord r : list) {
+            String parent = r.parent(now);
+            if (parent != null && now - r.lastSeen() <= ONLINE_TIMEOUT_MS) {
+                lowerCount.merge(parent, 1, Integer::sum);
+            }
+        }
 
         JSONArray nodeArray = new JSONArray();
         Set<String> seenEks = new HashSet<>();
@@ -206,8 +261,12 @@ public final class NodeStatusRegistry {
             if (r.ek != null) {
                 seenEks.add(r.ek);
                 if (ok) {
-                    chainInfo.put("registered", devices.containsKey(r.ek));
-                    chainInfo.put("active", Boolean.TRUE.equals(devices.get(r.ek)));
+                    TPMDeviceRegistry.DeviceInfo info = devices.get(r.ek);
+                    chainInfo.put("registered", info != null);
+                    chainInfo.put("active", info != null && info.active());
+                    if (info != null) {
+                        chainInfo.put("registeredAt", info.registeredAt().longValue());
+                    }
                 }
             }
             nodeArray.put(new JSONObject()
@@ -216,16 +275,22 @@ public final class NodeStatusRegistry {
                     .put("role", isBroker ? "broker" : "node")
                     .put("status", isOnline ? "online" : "offline")
                     .put("broker", nullToJson(r.parent(now)))
+                    .put("lowerNodeCount", lowerCount.getOrDefault(r.name, 0))
+                    .put("firstSeen", r.firstSeen)
                     .put("lastSeen", r.lastSeen())
                     .put("ek", nullToJson(r.ek))
                     .put("chain", chainInfo)
+                    .put("version", versionJson(versions.get(r.name), distMd5))
                     .put("resources", new JSONObject(r.resources)));
         }
 
         JSONArray neverSeen = new JSONArray();
-        devices.forEach((ek, active) -> {
+        devices.forEach((ek, info) -> {
             if (!seenEks.contains(ek)) {
-                neverSeen.put(new JSONObject().put("ek", ek).put("active", active));
+                neverSeen.put(new JSONObject()
+                        .put("ek", ek)
+                        .put("active", info.active())
+                        .put("registeredAt", info.registeredAt().longValue()));
             }
         });
 
@@ -249,13 +314,26 @@ public final class NodeStatusRegistry {
                 .put("nodes", nodeArray)
                 .put("registeredNeverSeen", neverSeen)
                 .put("stepDowns", stepDownArray)
+                .put("dist", new JSONObject().put("md5", nullToJson(distMd5)))
                 .put(
                         "chainStatus",
                         new JSONObject()
                                 .put("ok", ok)
                                 .put("fetchedAt", chainFetchedAt)
-                                .put("deviceCount", devices.size())
+                                .put("registeredTotal", devices.size())
                                 .put("error", nullToJson(chainError)));
+    }
+
+    /** 節點沒裝自動更新（從沒回報過）時為 JSON null */
+    private static Object versionJson(VersionRecord v, String distMd5) {
+        if (v == null) {
+            return JSONObject.NULL;
+        }
+        return new JSONObject()
+                .put("md5", nullToJson(v.md5()))
+                .put("running", v.running())
+                .put("checkedAt", v.checkedAt())
+                .put("current", v.md5() != null && v.md5().equals(distMd5));
     }
 
     private static String coalesce(String a, String b) {
@@ -266,8 +344,11 @@ public final class NodeStatusRegistry {
         return value == null ? JSONObject.NULL : value;
     }
 
+    private record VersionRecord(String md5, boolean running, long checkedAt, String remoteIp) {}
+
     private static final class NodeRecord {
         final String name;
+        final long firstSeen;
         String ip;
         String parent; // 最後一次把這台列為下層的 broker
         String ek;
@@ -275,8 +356,9 @@ public final class NodeStatusRegistry {
         long lastListed; // 最後一次被某個 broker 列為下層
         Map<String, String> resources = Map.of();
 
-        NodeRecord(String name) {
+        NodeRecord(String name, long firstSeen) {
             this.name = name;
+            this.firstSeen = firstSeen;
         }
 
         long lastSeen() {

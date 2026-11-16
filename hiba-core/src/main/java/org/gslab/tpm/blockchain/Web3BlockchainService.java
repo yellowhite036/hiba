@@ -409,20 +409,20 @@ public class Web3BlockchainService implements AutoCloseable {
     }
 
     /**
-     * 列出所有已註冊設備的 EK 指紋與啟用狀態（節點狀態頁用）。
+     * 列出所有已註冊設備的 EK 指紋與註冊資訊（節點狀態頁用）。
      * 查詢失敗時直接丟出例外，讓呼叫端知道鏈上資料不可用，而不是當成「沒有設備」。
      *
-     * @return EK 指紋 → 是否啟用（未撤銷）
+     * @return EK 指紋 → 註冊資訊（依註冊順序）
      */
-    public Map<String, Boolean> listRegisteredDevices() throws Exception {
+    public Map<String, TPMDeviceRegistry.DeviceInfo> listRegisteredDevices() throws Exception {
         final int pageSize = 100;
         long total = contract.getDeviceCount().send().longValue();
-        Map<String, Boolean> devices = new LinkedHashMap<>();
+        Map<String, TPMDeviceRegistry.DeviceInfo> devices = new LinkedHashMap<>();
         for (long offset = 0; offset < total; offset += pageSize) {
             List<String> page = contract.getRegisteredDevices(BigInteger.valueOf(offset), BigInteger.valueOf(pageSize))
                     .send();
             for (String ek : page) {
-                devices.put(ek, Boolean.TRUE.equals(contract.isDeviceActive(ek).send()));
+                devices.put(ek, contract.getDeviceInfo(ek).send());
             }
         }
         return devices;
