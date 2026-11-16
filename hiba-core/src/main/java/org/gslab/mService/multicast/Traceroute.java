@@ -136,6 +136,51 @@ public class Traceroute {
         return targetInterfaceInfo;
     }
 
+    /**
+     * 不連線，只查路由表：送往 targetIP 的封包會走哪張網卡、用哪個來源位址（{@code ip -4 route get}）。
+     * accounting server 離線時，用這個決定 HiBA 的網卡，節點才能照常啟動並參加 broker 選舉。
+     *
+     * @return {interface, address}；查不到時回傳 null
+     */
+    public static Map<String, String> routeInterface(String targetIP) {
+        if (targetIP == null || targetIP.isBlank() || System.getProperty("os.name").toLowerCase().startsWith("windows")) {
+            return null;
+        }
+        try {
+            Process child = new ProcessBuilder("ip", "-4", "route", "get", targetIP)
+                    .redirectErrorStream(true)
+                    .start();
+            String dev = null;
+            String src = null;
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(child.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    String[] parts = line.trim().split("\\s+");
+                    for (int i = 0; i + 1 < parts.length; i++) {
+                        if ("dev".equals(parts[i])) {
+                            dev = parts[i + 1];
+                        } else if ("src".equals(parts[i])) {
+                            src = parts[i + 1];
+                        }
+                    }
+                }
+            }
+            child.waitFor();
+            if (dev == null || src == null) {
+                return null;
+            }
+            Map<String, String> info = new HashMap<>();
+            info.put("interface", dev);
+            info.put("address", src);
+            return info;
+        } catch (IOException e) {
+            return null;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
+    }
+
     public static Map<String, String> connectAccountingServerToCheckInterface(String host, int port) {
         EventLoopGroup workerGroup = new NioEventLoopGroup();
         Bootstrap bootstrap = new Bootstrap();

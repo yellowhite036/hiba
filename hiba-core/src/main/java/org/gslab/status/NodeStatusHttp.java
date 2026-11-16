@@ -20,22 +20,33 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.RandomAccessFile;
 import java.net.InetSocketAddress;
+import java.net.URI;
 import java.net.URLDecoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
+import org.gslab.sdns.HiBAInitial;
+import org.gslab.sdns.HiBANetwork;
+import org.json.JSONException;
 import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * 節點狀態頁的 HTTP 路由（只在 accounting server 上有效）：
+ * 節點狀態頁的 HTTP 路由。
+ * <p>accounting server 上：</p>
  * <ul>
- * <li>GET / 、GET /nodes → 狀態網頁（resources/web/nodes.html）</li> * <li>GET /api/nodes → 狀態 JSON（安裝腳本也會讀它）</li>
+ * <li>GET / 、GET /nodes → 狀態網頁（resources/web/nodes.html）</li>
+ * <li>GET /api/nodes → 狀態 JSON（安裝腳本也會讀它）</li>
  * <li>DELETE /api/nodes/{name} → 從節點表移除一台離線節點（在線的回 409）</li>
  * <li>GET /dist/hiba-core-0.0.1.jar.md5?node=&amp;have=&amp;running= → 目前提供的 jar 的 md5；
  *     節點的自動更新程式（hiba_autoupdate.sh）每次檢查時呼叫，順便回報自己的版本</li>
  * <li>GET /dist/hiba-core-0.0.1.jar → 下載 jar（見 {@link DistJar}）</li>
  * </ul>
+ * <p>一般節點上：同樣提供 GET / 、GET /nodes 網頁，GET /api/nodes 與 DELETE /api/nodes/{name}
+ * 轉送給 env.json 設定的 accounting server，所以從任何一台節點都能看狀態頁。</p>
  */
 public final class NodeStatusHttp {
 
@@ -49,13 +60,13 @@ public final class NodeStatusHttp {
 
     /** @return true 表示已處理這個請求（呼叫端不要再處理） */
     public static boolean handle(ChannelHandlerContext ctx, FullHttpRequest request) {
-        if (!NodeStatusRegistry.get().isEnabled()) {
-            return false;
-        }
         String path = request.uri();
         int query = path.indexOf('?');
         if (query >= 0) {
             path = path.substring(0, query);
+        }
+        if (!NodeStatusRegistry.get().isEnabled()) {
+            return handleOnNode(ctx, request.method(), path);
         }
         if (HttpMethod.DELETE.equals(request.method()) && path.startsWith(NODE_PATH_PREFIX)) {
             forget(ctx, URLDecoder.decode(path.substring(NODE_PATH_PREFIX.length()), StandardCharsets.UTF_8));
@@ -88,6 +99,113 @@ public final class NodeStatusHttp {
                 return true;
             default:
                 return false;
+        }
+    }
+
+    // ============ 一般節點：網頁自己提供，資料轉送給 accounting server ============
+
+    private static final HttpClient PROXY_CLIENT =
+            HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
+
+    private static boolean handleOnNode(ChannelHandlerContext ctx, HttpMethod method, String path) {
+        if (HttpMethod.GET.equals(method)) {
+            switch (path) {
+                case "/":
+                case "/nodes":
+                case "/nodes/":
+                    sendPage(ctx);
+                    return true;
+                case "/api/nodes":
+                    proxyToAcct(ctx, "GET", path, true);
+                    return true;
+                default:
+                    return false;
+            }
+        }
+        if (HttpMethod.DELETE.equals(method) && path.startsWith(NODE_PATH_PREFIX)) {
+            proxyToAcct(ctx, "DELETE", path, false);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 非同步轉送給 accounting server（不卡住 Netty 的執行緒）。
+     *
+     * @param rawPath 原始（已 URL 編碼）的路徑，原樣轉送
+     * @param annotate true 時在回傳的 JSON 加上 accounting server 位址與「透過哪台節點檢視」
+     */
+    private static void proxyToAcct(ChannelHandlerContext ctx, String method, String rawPath, boolean annotate) {
+        String acct = HiBAInitial.accountingServer;
+        if (acct == null || acct.isBlank()) {
+            sendError(ctx, HttpResponseStatus.SERVICE_UNAVAILABLE, "這台節點的 env.json 沒有設定 accountingServer");
+            return;
+        }
+        URI uri;
+        try {
+            uri = URI.create("http://" + acct + ":" + HiBAInitial.HTTP_REQUEST_PORT + rawPath);
+        } catch (IllegalArgumentException e) {
+            sendError(ctx, HttpResponseStatus.BAD_REQUEST, "路徑不正確");
+            return;
+        }
+        HttpRequest proxied = HttpRequest.newBuilder(uri)
+                .timeout(Duration.ofSeconds(5))
+                .method(method, HttpRequest.BodyPublishers.noBody())
+                .build();
+        PROXY_CLIENT
+                .sendAsync(proxied, java.net.http.HttpResponse.BodyHandlers.ofByteArray()) // Netty 也有 HttpResponse
+                .whenComplete((resp, err) -> {
+                    if (err != null) {
+                        sendError(ctx, HttpResponseStatus.BAD_GATEWAY,
+                                "連不到 accounting server " + acct + "（" + rootMessage(err) + "）");
+                        return;
+                    }
+                    byte[] body = resp.body();
+                    if (annotate && resp.statusCode() == 200) {
+                        body = annotate(body, acct);
+                    }
+                    String type = resp.headers().firstValue("content-type").orElse("application/json; charset=UTF-8");
+                    send(ctx, HttpResponseStatus.valueOf(resp.statusCode()), type, body);
+                });
+    }
+
+    private static byte[] annotate(byte[] body, String acct) {
+        try {
+            JSONObject json = new JSONObject(new String(body, StandardCharsets.UTF_8));
+            JSONObject server = json.optJSONObject("accountingServer");
+            if (server == null) {
+                server = new JSONObject();
+                json.put("accountingServer", server);
+            }
+            server.put("address", acct);
+            json.put("viewedVia", new JSONObject()
+                    .put("name", HiBAInitial.nodeName == null ? JSONObject.NULL : HiBAInitial.nodeName)
+                    .put("ip", HiBANetwork.LOCAL_IP == null ? JSONObject.NULL : HiBANetwork.LOCAL_IP));
+            return json.toString().getBytes(StandardCharsets.UTF_8);
+        } catch (JSONException e) {
+            return body;
+        }
+    }
+
+    private static String rootMessage(Throwable t) {
+        while (t.getCause() != null) {
+            t = t.getCause();
+        }
+        return t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage();
+    }
+
+    private static void sendError(ChannelHandlerContext ctx, HttpResponseStatus status, String message) {
+        send(ctx, status, "application/json; charset=UTF-8",
+                new JSONObject().put("error", message).toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static void sendPage(ChannelHandlerContext ctx) {
+        byte[] page = loadResource(PAGE_RESOURCE);
+        if (page == null) {
+            send(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR, "text/plain; charset=UTF-8",
+                    "nodes.html not found in jar".getBytes(StandardCharsets.UTF_8));
+        } else {
+            send(ctx, HttpResponseStatus.OK, "text/html; charset=UTF-8", page);
         }
     }
 

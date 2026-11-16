@@ -427,6 +427,13 @@
   const acctVersionLine = (d) => acctMd5(d)
     ? `<span class="mono" title="${esc(acctMd5(d))}">版本 ${esc(shortMd5(acctMd5(d)))}${acctStale(d) ? `（提供 ${esc(shortMd5(d.dist.md5))}，尚未重啟）` : ""}</span>`
     : "";
+  // accounting server 的位址：從一般節點檢視時由節點轉送並附上；直接開 acct 時就是網址的主機
+  const acctHost = (d) => (d && d.accountingServer && d.accountingServer.address) || location.hostname;
+  // 節點轉送失敗時回 {"error": "..."}，顯示這段說明而不只是 HTTP 狀態碼
+  const errorText = async (r) => {
+    try { const j = await r.json(); if (j && j.error) return j.error; } catch (e) { /* ignore */ }
+    return "HTTP " + r.status;
+  };
   const resLabel = (k) => ({ computility: "CPU 分數", fileNameCount: "檔案數" }[k] || k);
   const resValue = (k, v) => (k === "computility" && !isNaN(parseFloat(v)) ? parseFloat(v).toFixed(2) : v);
 
@@ -549,7 +556,7 @@
         label = `Accounting server，${sub.online}/${sub.total} 在線`;
         card = `<div class="node root is-online">
             <div class="node-h"><span class="kind root">${icon("server")}</span><span class="name">Accounting server</span></div>
-            <span class="mono">${esc(location.hostname)}</span>${acctVersionLine(d)}
+            <span class="mono">${esc(acctHost(d))}</span>${acctVersionLine(d)}
             <div class="node-f"><span class="badge b-ok">${icon("check")}運作中</span><span>${sub.online}/${sub.total} 在線</span></div>
           </div>`;
       } else {
@@ -604,7 +611,7 @@
       if (!nets.has(k)) nets.set(k, { key: k, nodes: [] });
       nets.get(k).nodes.push(n);
     }
-    const acctNet = subnetOf(location.hostname);
+    const acctNet = subnetOf(acctHost(d));
     const parentOf = new Map();
     for (const net of nets.values()) {
       if (net.key === NO_IP) continue;
@@ -677,7 +684,7 @@
             aria-label="${esc(`Accounting server，${pm.nets.size} 個網段`)}" ${kids.length ? 'aria-expanded="true"' : ""} tabindex="-1">
             <div class="node root is-online">
               <div class="node-h"><span class="kind root">${icon("server")}</span><span class="name">Accounting server</span></div>
-              <span class="mono">${esc(location.hostname)}</span>${acctVersionLine(d)}
+              <span class="mono">${esc(acctHost(d))}</span>${acctVersionLine(d)}
               <div class="node-f"><span class="badge b-ok">${icon("check")}運作中</span><span>${pm.nets.size} 個網段・${online}/${d.nodes.length} 在線</span></div>
             </div>
             ${kids.length ? `<ul role="group">${kids.map((c) => item(c, 2, ROOT)).join("")}</ul>` : ""}</li>`;
@@ -697,7 +704,7 @@
       const rows = [
         hasAcct ? `<div role="listitem"><div class="pn acct" aria-label="Accounting server"><span class="dot" aria-hidden="true"></span>
             <span class="kind root" style="width:22px;height:22px">${icon("server")}</span><span class="pn-text"><span class="pn-name">Accounting server</span>
-            <span class="mono">${esc(location.hostname)}</span></span></div></div>` : "",
+            <span class="mono">${esc(acctHost(d))}</span></span></div></div>` : "",
         ...shown.map(row),
       ].join("");
       const hidden = net.nodes.length - shown.length;
@@ -774,7 +781,7 @@
     const n = state.selected && state.selected !== ROOT ? d.nodes.find((x) => x.name === state.selected) : null;
     if (!n) {
       $("detail").innerHTML = state.selected === ROOT
-        ? `<dl class="dl"><dt>角色</dt><dd>Accounting server</dd><dt>位址</dt><dd class="mono">${esc(location.host)}</dd>
+        ? `<dl class="dl"><dt>角色</dt><dd>Accounting server</dd><dt>位址</dt><dd class="mono">${esc(acctHost(d))}</dd>
              <dt>說明</dt><dd>彙整所有 broker 的回報，${d.onlineTimeoutMs / 1000} 秒沒回報即視為離線。</dd>
              <dt>版本</dt><dd>${acctVersionBadge(d)}<div class="muted small mono">${esc(acctMd5(d) || "–")}</div>
                ${acctStale(d) ? `<div class="muted small">jar 檔已換成新版，但程式還沒重啟；重啟後才會生效。</div>` : ""}</dd>
@@ -878,10 +885,11 @@
   async function fetchOnce() {
     try {
       const r = await fetch("/api/nodes", { cache: "no-store" });
-      if (!r.ok) throw new Error("HTTP " + r.status);
+      if (!r.ok) throw new Error(await errorText(r));
       state.data = await r.json();
       state.error = null;
-      $("updated").textContent = `更新於 ${fmtTime(Date.now())}`;
+      $("updated").textContent = `更新於 ${fmtTime(Date.now())}` +
+        (state.data.viewedVia ? `・透過 ${state.data.viewedVia.name || state.data.viewedVia.ip || "這台節點"} 檢視（資料來自 accounting server ${acctHost(state.data)}）` : "");
     } catch (e) {
       state.error = e.message || String(e);
     }

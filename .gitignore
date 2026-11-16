@@ -32,3 +32,5 @@ dependency-reduced-pom.xml
 *:Zone.Identifier
 
 temp/
+# 節點設定範本含私鑰，只放在 Pi 的 ~/hiba_dist/template
+deploy/hiba_dist/template/

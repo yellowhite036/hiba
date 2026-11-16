@@ -166,6 +166,18 @@ public class HiBAInitial {
                 } else {
                     hibaNetworkInterfaceInfo =
                             Traceroute.connectAccountingServerToCheckInterface(accountingServer, HIBA_PORT);
+                    if (hibaNetworkInterfaceInfo == null || hibaNetworkInterfaceInfo.isEmpty()) {
+                        // accounting server 連不上：改查路由表決定網卡，照常啟動；之後連線由 HiBANetwork 持續重試
+                        hibaNetworkInterfaceInfo = Traceroute.routeInterface(accountingServer);
+                        if (hibaNetworkInterfaceInfo != null) {
+                            logger.atWarn()
+                                    .log(
+                                            "Accounting Server {} unreachable, use routing table: interface {} address {}",
+                                            accountingServer,
+                                            hibaNetworkInterfaceInfo.get("interface"),
+                                            hibaNetworkInterfaceInfo.get("address"));
+                        }
+                    }
                 }
             } catch (Exception e) {
                 logger.atError().log("System init error info:");

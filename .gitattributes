@@ -1,0 +1,2 @@
+# 部署腳本在 Linux 上執行：一律用 LF，避免 Windows（core.autocrlf=true）checkout 成 CRLF 後 bash 無法執行
+*.sh text eol=lf
