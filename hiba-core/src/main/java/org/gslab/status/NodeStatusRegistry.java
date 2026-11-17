@@ -60,6 +60,7 @@ public final class NodeStatusRegistry {
     private volatile String accountingServerName = "";
     private volatile String runningMd5; // accounting server 自己執行中的 jar；從 IDE 執行時為 null
     private volatile long startedAt;
+    private volatile String actingAddress; // 由根網段的 broker 擔任時是它的 IP；專用的 accounting server 為 null
 
     private final Map<String, NodeRecord> nodes = new ConcurrentHashMap<>(); // nodeName → 最後一次看到的資料
     private final Deque<JSONObject> stepDowns = new ArrayDeque<>(); // 新的在前，存取時要 synchronized
@@ -77,29 +78,71 @@ public final class NodeStatusRegistry {
         return INSTANCE;
     }
 
-    /** accounting server 啟動時呼叫一次：開始接受報告，並定期讀取鏈上註冊清單。 */
+    /** 專用的 accounting server 啟動時呼叫一次：開始接受報告，並定期讀取鏈上註冊清單。 */
     public synchronized void enable(String accountingServerName, Web3BlockchainService chain) {
         if (enabled) {
             return;
         }
-        this.accountingServerName = accountingServerName == null ? "" : accountingServerName;
+        start(accountingServerName, null, chain, ManagementFactory.getRuntimeMXBean().getStartTime());
+        logger.atInfo().log("Node status page enabled (GET /nodes, /api/nodes).");
+    }
+
+    /**
+     * 根網段的 broker 開始擔任 accounting server（{@link org.gslab.sdns.AcctRole}）時呼叫。
+     *
+     * @param address 本機 IP，網頁顯示 accounting server 位址用
+     */
+    public synchronized void enableActing(String name, String address, Web3BlockchainService chain) {
+        if (enabled) {
+            return;
+        }
+        start(name, address, chain, System.currentTimeMillis());
+        logger.atInfo().log("Acting as accounting server: node status page enabled.");
+    }
+
+    /** 不再擔任 accounting server：停止接受報告並清掉資料（之後重新擔任時從頭記錄） */
+    public synchronized void disable() {
+        if (!enabled) {
+            return;
+        }
+        enabled = false;
+        nodes.clear();
+        versions.clear();
+        synchronized (stepDowns) {
+            stepDowns.clear();
+        }
+        logger.atInfo().log("Node status page disabled (no longer the accounting server).");
+    }
+
+    private ScheduledExecutorService scheduler;
+
+    private void start(String name, String address, Web3BlockchainService chain, long startedAt) {
+        this.accountingServerName = name == null ? "" : name;
+        this.actingAddress = address;
         this.chain = chain;
         // 啟動時就記下執行中 jar 的 md5：之後 jar 檔被換掉但還沒重啟，網頁才分得出來
         this.runningMd5 = DistJar.md5Of(DistJar.runningJar());
-        this.startedAt = ManagementFactory.getRuntimeMXBean().getStartTime();
+        this.startedAt = startedAt;
         this.enabled = true;
-
-        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "node-status-chain");
-            t.setDaemon(true);
-            return t;
-        });
-        scheduler.scheduleWithFixedDelay(this::refreshChain, 0, CHAIN_REFRESH_SEC, TimeUnit.SECONDS);
-        logger.atInfo().log("Node status page enabled (GET /nodes, /api/nodes).");
+        if (scheduler == null) {
+            scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "node-status-chain");
+                t.setDaemon(true);
+                return t;
+            });
+            scheduler.scheduleWithFixedDelay(this::refreshChain, 0, CHAIN_REFRESH_SEC, TimeUnit.SECONDS);
+        } else {
+            scheduler.execute(this::refreshChain);
+        }
     }
 
     public boolean isEnabled() {
         return enabled;
+    }
+
+    /** 由根網段的 broker 代理時為 true（專用的 accounting server 為 false） */
+    public boolean isActing() {
+        return enabled && actingAddress != null;
     }
 
     // ============ 資料進來 ============
@@ -211,6 +254,9 @@ public final class NodeStatusRegistry {
     }
 
     private void refreshChain() {
+        if (!enabled) {
+            return; // 不再擔任 accounting server 時不讀鏈
+        }
         Web3BlockchainService service = chain;
         if (service == null) {
             chainOk = false;
@@ -312,6 +358,8 @@ public final class NodeStatusRegistry {
                         new JSONObject()
                                 .put("name", accountingServerName)
                                 .put("startedAt", startedAt)
+                                .put("acting", actingAddress != null)
+                                .put("address", nullToJson(actingAddress))
                                 .put(
                                         "version",
                                         new JSONObject()

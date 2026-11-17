@@ -85,6 +85,7 @@ import org.gslab.mService.multicast.MulticastReceiver;
 import org.gslab.mService.multicast.Traceroute;
 import org.gslab.tpm.PublicKeyCacheService;
 import org.gslab.tpm.blockchain.Web3BlockchainService;
+import org.gslab.mService.NTPServer;
 import org.gslab.status.NodeStatusRegistry;
 import org.gslab.tpm.exception.TPMConnectionException;
 import org.slf4j.Logger;
@@ -102,7 +103,7 @@ public class HiBANetwork implements SdnNetwork {
     private String localServerHost = "";
     private String localName = "";
 
-    private String accountingServerHost = "";
+    private volatile String accountingServerHost = ""; // 目前連線的 accounting server（見 AcctRole，會隨代理的 broker 改變）
 
     private static final long SEND_MESSAGE_TIMEOUT_SECONDS = 10; // sendMessage() max wait for a reply
 
@@ -179,6 +180,13 @@ public class HiBANetwork implements SdnNetwork {
         this.clientKeepAliver = this.new ClientKeepAliver();
         this.acctClientKeepAliver = this.new AcctClientKeepAliver();
         this.acctServerKeepAliver = this.new AcctServerKeepAliver();
+        // 找目前的 accounting server 時先問上層 broker（見 AcctRole）
+        AcctRole.setUpperBrokerSupplier(() -> {
+            Channel upper = brokerChannel;
+            return upper != null && upper.isActive() && upper.remoteAddress() instanceof InetSocketAddress a
+                    ? a.getAddress().getHostAddress()
+                    : null;
+        });
 
         TPMDeviceRegistryConfig tpmDeviceRegistryConfig =
                 new SystemConfigurationLoader("./env.json").loadTPMDeviceRegistryConfig();
@@ -299,8 +307,10 @@ public class HiBANetwork implements SdnNetwork {
         HIBA_PORT = HiBAInitial.HIBA_PORT;
         setChannelPubKey("clear");
 
-        startServer(new InetSocketAddress("0.0.0.0", HIBA_PORT)); // main Reactor
+        startServer(new InetSocketAddress("0.0.0.0", HIBA_PORT), false); // main Reactor
         if (isServer.get()) {
+            // 各 broker 的 acct 連線改用獨立的 port（見 AcctRole），舊的 HIBA_PORT 也照常接受
+            startServer(new InetSocketAddress("0.0.0.0", AcctRole.acctPort()), true);
             new Thread(acctClientKeepAliver).start(); // accounting server receives and management the lower layer
             // broker check.
         } else {
@@ -331,6 +341,9 @@ public class HiBANetwork implements SdnNetwork {
                 Thread.sleep(300);
                 new Thread(acctServerKeepAliver).start(); // The broker to accounting server KeepAlive.
                 new Thread(new HiBAFileTransferServer()).start(); // HiBA data plane file transfer server.
+                // 根網段的 broker 擔任 accounting server（見 AcctRole）
+                new Thread(acctClientKeepAliver, "acct-lower-broker").start();
+                new Thread(new AcctRoleManager(), "acct-role").start();
             } else {
                 logger.atError().log("Can't connect to Accounting server.");
                 logger.atError().log("Exiting due to inability to connect to Accounting server.");
@@ -347,9 +360,15 @@ public class HiBANetwork implements SdnNetwork {
         }
     }
 
-    public void startServer(InetSocketAddress address) { // MainReactor
+    /**
+     * @param acctPipeline true：accounting server 的連線（下層 broker 的 acct 連線、狀態報告、讓位通知）；
+     *     專用的 accounting server 上兩個 port 都是 true
+     * @return 關閉這個 server 用
+     */
+    public ServerHandle startServer(InetSocketAddress address, boolean acctPipeline) { // MainReactor
+        final boolean acct = acctPipeline || isServer.get();
         NioEventLoopGroup computeBossWorker = new NioEventLoopGroup();
-        new ServerBootstrap()
+        ChannelFuture bindFuture = new ServerBootstrap()
                 .group(computeBossWorker)
                 .channel(NioServerSocketChannel.class)
                 .childHandler(new ChannelInitializer<NioSocketChannel>() {
@@ -385,7 +404,7 @@ public class HiBANetwork implements SdnNetwork {
                                                 logger.atInfo()
                                                         .addKeyValue("nodeName", msg.getName())
                                                         .log("{} join group.", msg.getName());
-                                                if ("server".equals(localName)) {
+                                                if (acct) {
                                                     acctLowerBroker.put(
                                                             channel, Map.entry(msg.getName(), msg.getServerIp()));
                                                 } else {
@@ -437,7 +456,8 @@ public class HiBANetwork implements SdnNetwork {
                             ////// 不太懂這邊為什麼回傳的broker是server自己??
                             @Override
                             protected void channelRead0(ChannelHandlerContext ctx, GetBrokerNameMessage msg) {
-                                ctx.channel().writeAndFlush(new GetBrokerNameResponse(localName));
+                                // acct 連線回 "server"（和專用 accounting server 相同），連線端才不會把它當成上層 broker 的名字
+                                ctx.channel().writeAndFlush(new GetBrokerNameResponse(acct ? "server" : localName));
                             }
                         });
 
@@ -539,12 +559,12 @@ public class HiBANetwork implements SdnNetwork {
                                                 ctx.channel().writeAndFlush(new TierCheckResponse(checkSuccess.get()));
                                             }
                                         });
-                        if (!isServer.get()) {
+                        if (!acct) {
                             channel.pipeline()
                                     .addLast(multicastBrokerSelector); // channel.pipeline().addLast(brokerSelector);
                         }
 
-                        if ("server".equals(localName)) {
+                        if (acct) {
                             // 節點狀態頁：broker 的狀態報告與讓位通知
                             channel.pipeline().addLast(new SimpleChannelInboundHandler<NodeStatusReport>() {
                                 @Override
@@ -572,7 +592,8 @@ public class HiBANetwork implements SdnNetwork {
                             channel.pipeline().addLast(clientKeepAliver);
                         }
 
-                        if (sInitializer != null) {
+                        // 一般節點代理 accounting server 的 acct port 只處理 acct 訊息，不接應用層的處理器
+                        if (sInitializer != null && (isServer.get() || !acct)) {
                             sInitializer.initial(channel);
                         }
 
@@ -581,7 +602,7 @@ public class HiBANetwork implements SdnNetwork {
                             public void channelInactive(ChannelHandlerContext ctx) throws Exception {
                                 Channel clientChannel = ctx.channel();
 
-                                if ("server".equals(localName)) {
+                                if (acct) {
                                     if (acctLowerBroker.containsKey(clientChannel)) {
                                         String nodeName = acctLowerBroker
                                                 .get(clientChannel)
@@ -628,11 +649,34 @@ public class HiBANetwork implements SdnNetwork {
                         });
                     }
                 })
-                .bind(new InetSocketAddress("0.0.0.0", HIBA_PORT));
+                .bind(address);
+        return new ServerHandle(bindFuture, computeBossWorker);
+    }
+
+    /** {@link #startServer} 啟動的 server；代理 accounting server 結束時用來關掉 acct port */
+    public record ServerHandle(ChannelFuture bindFuture, NioEventLoopGroup group) {
+        /** 等待 bind 完成；port 被占用等失敗時回傳 false 並釋放資源 */
+        boolean awaitBound() throws InterruptedException {
+            bindFuture.await();
+            if (!bindFuture.isSuccess()) {
+                group.shutdownGracefully();
+                return false;
+            }
+            return true;
+        }
+
+        void close() {
+            bindFuture.channel().close();
+            group.shutdownGracefully(); // 也會關閉這個 server 上所有已接受的連線
+        }
     }
 
     public ChannelFuture connectToBroker(Bootstrap bootstrap, String brokerHost) throws InterruptedException {
-        ChannelFuture connectFuture = bootstrap.connect(new InetSocketAddress(brokerHost, HIBA_PORT));
+        return connectTo(bootstrap, brokerHost, HIBA_PORT);
+    }
+
+    public ChannelFuture connectTo(Bootstrap bootstrap, String host, int port) throws InterruptedException {
+        ChannelFuture connectFuture = bootstrap.connect(new InetSocketAddress(host, port));
         connectFuture.await();
         return connectFuture;
     }
@@ -969,6 +1013,10 @@ public class HiBANetwork implements SdnNetwork {
                             stepDownTo(winner);
                             break;
                         }
+                        // 根網段的 broker 就是 accounting server（AcctRoleManager 負責啟用），沒有上層要找
+                        if (AcctRole.isRootTier() && !AcctRole.dedicatedAcctAlive()) {
+                            break;
+                        }
                         ArrayList<String> acctResponseBrokerList = new ArrayList<>(); // accounting server response all
                         // broker host list.
                         ArrayList<String> mightUpperBroker = new ArrayList<>(); // Filter acctResponseBrokerList by
@@ -981,15 +1029,23 @@ public class HiBANetwork implements SdnNetwork {
                          * 'Accounting server'.
                          */
                         if (accountingServerChannel == null) {
+                            // 目前的 accounting server：設定的位址，或接手的根網段 broker（AcctRole）
+                            String acctHost = AcctRole.currentAcct();
+                            if (acctHost != null) {
+                                accountingServerHost = acctHost;
+                            }
                             brokerInformation.put("ip", accountingServerHost);
                             try {
+                                if (acctHost == null) {
+                                    throw new IllegalStateException("accounting server not found");
+                                }
                                 GetBrokerListResponse response =
-                                        (GetBrokerListResponse) sendMessage(accountingServerHost, new GetBrokerList());
+                                        (GetBrokerListResponse) sendMessage(acctHost, new GetBrokerList());
                                 if (response != null) {
                                     acctResponseBrokerList = response.getBrokerList();
                                     logger.atInfo().log("Received broker list: {}", acctResponseBrokerList);
                                     ChannelFuture connectFuture =
-                                            connectToBroker(clientBootstrap, accountingServerHost);
+                                            connectTo(clientBootstrap, acctHost, AcctRole.acctPort());
                                     if (accountingServerChannel != null) {
                                         accountingServerChannel.close();
                                     }
@@ -1001,6 +1057,7 @@ public class HiBANetwork implements SdnNetwork {
                                                 "Can't connect to Accounting Server {}", accountingServerHost);
                                         msgCount = 0;
                                     }
+                                    AcctRole.invalidate();
                                     brokerInformation.clear();
                                 }
                             } catch (Exception e) {
@@ -1009,6 +1066,7 @@ public class HiBANetwork implements SdnNetwork {
                                     logger.atInfo().log("Can't connect to Accounting Server {}", accountingServerHost);
                                     msgCount = 0;
                                 }
+                                AcctRole.invalidate();
                                 brokerInformation.clear();
                             }
                         }
@@ -1518,6 +1576,69 @@ public class HiBANetwork implements SdnNetwork {
         return summary;
     }
 
+    /**
+     * 根網段的 broker 擔任 accounting server（見 {@link AcctRole}）：
+     * 本機在根網段、是 broker、而且設定的位址上沒有專用的 accounting server 時啟用；
+     * 讓位或不再是 broker 時關閉，各 broker 的 acct 連線斷掉後會重新找到新的 accounting server。
+     */
+    private class AcctRoleManager implements Runnable {
+
+        private ServerHandle acctServer;
+        private boolean ntpStarted = false;
+        private int bindFailures = 0;
+
+        @Override
+        public void run() {
+            while (true) {
+                delay(1);
+                try {
+                    boolean rootTier = AcctRole.isRootTier();
+                    // 根網段的每台都定期確認專用 accounting server 是否還在（AcctRole.knownAcct 會用到）
+                    boolean dedicated = rootTier && AcctRole.dedicatedAcctAlive();
+                    boolean want = rootTier && !dedicated && "isBroker".equals(MulticastController.getMode());
+                    if (want && !AcctRole.isActing()) {
+                        startActing();
+                    } else if (!want && AcctRole.isActing()) {
+                        stopActing();
+                    }
+                } catch (Exception e) {
+                    logger.atWarn().setCause(e).log("Accounting server role check failed");
+                }
+            }
+        }
+
+        private void startActing() throws InterruptedException {
+            ServerHandle server = startServer(new InetSocketAddress("0.0.0.0", AcctRole.acctPort()), true);
+            if (!server.awaitBound()) {
+                if (bindFailures++ % 30 == 0) {
+                    logger.atWarn().log("Cannot listen on accounting server port {}", AcctRole.acctPort());
+                }
+                return;
+            }
+            bindFailures = 0;
+            acctServer = server;
+            NodeStatusRegistry.get().enableActing(localName, LOCAL_IP, tpmDeviceRegistryService);
+            AcctRole.setActing(true);
+            if (!ntpStarted) {
+                ntpStarted = true;
+                new Thread(new NTPServer(), "ntp-server").start(); // 和專用 accounting server 一樣提供對時（port 9081）
+            }
+            logger.atInfo().log("This node ({}) is now the accounting server (top-level broker).", LOCAL_IP);
+        }
+
+        private void stopActing() {
+            AcctRole.setActing(false);
+            NodeStatusRegistry.get().disable();
+            if (acctServer != null) {
+                acctServer.close(); // 關掉 acct port 與其上所有 broker 的 acct 連線
+                acctServer = null;
+            }
+            acctLowerBroker.clear();
+            brokerList.clear();
+            logger.atInfo().log("This node is no longer the accounting server.");
+        }
+    }
+
     @Sharable
     private class AcctServerKeepAliver extends SimpleChannelInboundHandler<AccountingTestResponse>
             implements Runnable { // broker
@@ -1538,6 +1659,24 @@ public class HiBANetwork implements SdnNetwork {
             logger.atInfo().log("Accounting Server heartbeat Start");
             while (true) {
                 delay(1);
+
+                // 本機就是 accounting server（根網段的 broker）：不連自己，報告直接寫進本機的節點表
+                if (AcctRole.isActing()) {
+                    Channel old = accountingServerChannel;
+                    accountingServerChannel = null;
+                    if (old != null) {
+                        old.close();
+                    }
+                    if (++reportTick >= NODE_REPORT_INTERVAL_SEC) {
+                        reportTick = 0;
+                        try {
+                            NodeStatusRegistry.get().onReport(buildStatusReport(), localEk(), LOCAL_IP);
+                        } catch (Exception e) {
+                            logger.atDebug().setCause(e).log("Failed to record local status report");
+                        }
+                    }
+                    continue;
+                }
 
                 if (accountingServerChannel == null) {
                     reportTick = NODE_REPORT_INTERVAL_SEC - 1;
@@ -1576,7 +1715,14 @@ public class HiBANetwork implements SdnNetwork {
                         }
                         accountingServerChannel.close();
                         accountingServerChannel = null;
-                        ChannelFuture connectFuture = connectToBroker(clientBootstrap, accountingServerHost);
+                        // accounting server 可能換人了（原本的 broker 離線、根網段選出新的）：重新找
+                        AcctRole.invalidate();
+                        String acctHost = AcctRole.currentAcct();
+                        if (acctHost == null) {
+                            continue; // 找不到；選 broker 的流程會繼續重試
+                        }
+                        accountingServerHost = acctHost;
+                        ChannelFuture connectFuture = connectTo(clientBootstrap, acctHost, AcctRole.acctPort());
                         if (connectFuture.isSuccess()) {
                             accountingServerChannel = connectFuture.channel();
                             responseTimeoutSec.set(0);
@@ -1638,6 +1784,11 @@ public class HiBANetwork implements SdnNetwork {
                         counter.put(channel, new AtomicInteger(0));
                     }
                 });
+                // 根網段的 broker 代理 accounting server 時，它自己也是 broker 清單的一員：
+                // 第二層的 broker 要靠這份清單比對出它是上層
+                if (AcctRole.isActing() && LOCAL_IP != null && !brokerList.contains(LOCAL_IP)) {
+                    brokerList.add(LOCAL_IP);
+                }
             }
         }
 

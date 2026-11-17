@@ -296,6 +296,18 @@ KERNEL=="tpmrm[0-9]*", GROUP="tss", MODE="0660"' | sudo tee /etc/udev/rules.d/60
     sleep 1
     TPM_GROUP="$(stat -c %G /dev/tpmrm0)"
 fi
+if [ -f "$SWTPM_UNIT" ]; then
+    # 軟體 TPM 非正常關機（斷電、強制關 VM）會算一次授權失敗，預設 3 次就鎖住、HiBA 簽章全部失敗
+    if sudo tpm2_getcap properties-variable 2>/dev/null | grep -qE 'inLockout:\s*1'; then
+        sudo tpm2_dictionarylockout --clear-lockout >/dev/null 2>&1 && warn "軟體 TPM 原本被鎖定（字典攻擊保護），已解除"
+    fi
+    if sudo tpm2_dictionarylockout --setup-parameters --max-tries=1000 --recovery-time=60 \
+        --lockout-recovery-time=60 >/dev/null 2>&1; then
+        ok "軟體 TPM 字典攻擊保護：失敗 1000 次才鎖定、每 60 秒恢復 1 次"
+    else
+        warn "無法調整軟體 TPM 的字典攻擊保護（自動更新程式之後會再試）"
+    fi
+fi
 if id -nG "$(whoami)" | tr ' ' '\n' | grep -qx "$TPM_GROUP"; then
     ok "$(whoami) 已在 $TPM_GROUP 群組"
 else

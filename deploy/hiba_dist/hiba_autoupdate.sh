@@ -9,6 +9,12 @@
 #   4. 新版啟動失敗 → 換回舊 jar 並重新啟動，記下這個 md5，之後不再重試同一版
 #      （Pi 換上修正後的新版，md5 不同，就會再自動更新）
 #
+# 每次執行前也會做節點維護（見 maintain）：
+#   - jar 裡附帶的新版 hiba_autoupdate.sh 和這支不同 → 換成新版（下次執行生效）
+#   - hiba.service 還是 Restart=on-failure → 改成 Restart=always
+#   - 軟體 TPM（swtpm-hiba）：調寬字典攻擊保護；被鎖定時自動解除
+# 所以節點只要 jar 是最新版，這些設定也會跟著更新，不用再手動執行 install_node.sh / setup_node.sh。
+#
 # HiBA 原本沒在執行（例如手動停掉）時只換 jar，不會啟動它。
 # 紀錄：$DIR/logs/autoupdate.log，或 journalctl -u hiba-autoupdate.service
 #
@@ -135,6 +141,57 @@ start_and_check() {
     return 0
 }
 
+SELF="/usr/local/sbin/hiba-autoupdate"
+HIBA_UNIT_FILE="/etc/systemd/system/$UNIT"
+SWTPM_UNIT_FILE="/etc/systemd/system/swtpm-hiba.service"
+TPM_DA_MARK="$DIR/.tpm-da-v1"
+
+# 從本機 jar 取出一個檔案（jar 就是 zip）
+jar_file() {
+    python3 - "$DIR/$JAR" "$1" <<'EOF'
+import sys, zipfile
+try:
+    with zipfile.ZipFile(sys.argv[1]) as z:
+        sys.stdout.buffer.write(z.read(sys.argv[2]))
+except Exception:
+    sys.exit(1)
+EOF
+}
+
+maintain() {
+    # 1. 自我更新：jar 內附的 hiba_dist/hiba_autoupdate.sh（pom.xml 打包進去的）
+    local tmp
+    tmp="$(mktemp)"
+    if [ -f "$DIR/$JAR" ] && jar_file hiba_dist/hiba_autoupdate.sh > "$tmp" 2>/dev/null \
+        && [ -s "$tmp" ] && bash -n "$tmp" 2>/dev/null && [ -f "$SELF" ] && ! cmp -s "$tmp" "$SELF"; then
+        install -m 755 "$tmp" "$SELF" && log "自動更新程式已換成 jar 內附的版本（下次執行生效）"
+    fi
+    rm -f "$tmp"
+
+    # 2. HiBA 遇到錯誤常以 exit code 0 結束，on-failure 不會重啟它
+    if [ -f "$HIBA_UNIT_FILE" ] && grep -q '^Restart=on-failure$' "$HIBA_UNIT_FILE"; then
+        sed -i 's/^Restart=on-failure$/Restart=always/' "$HIBA_UNIT_FILE" \
+            && systemctl daemon-reload && log "hiba.service 已改為 Restart=always"
+    fi
+
+    # 3. 軟體 TPM：非正常關機（斷電、強制關 VM）會算一次授權失敗，預設 3 次就鎖住、簽章全部失敗
+    if [ -f "$SWTPM_UNIT_FILE" ] && command -v tpm2_dictionarylockout >/dev/null 2>&1; then
+        local caps
+        caps="$(tpm2_getcap properties-variable 2>/dev/null)"
+        if [[ "$caps" =~ inLockout:[[:space:]]*1 ]]; then
+            tpm2_dictionarylockout --clear-lockout >/dev/null 2>&1 && log "軟體 TPM 被鎖定（字典攻擊保護），已自動解除"
+        fi
+        if [ ! -f "$TPM_DA_MARK" ] && tpm2_dictionarylockout --setup-parameters \
+            --max-tries=1000 --recovery-time=60 --lockout-recovery-time=60 >/dev/null 2>&1; then
+            touch "$TPM_DA_MARK"
+            own "$TPM_DA_MARK"
+            log "軟體 TPM 的字典攻擊保護已調寬（失敗 1000 次才鎖定，每 60 秒恢復 1 次）"
+        fi
+    fi
+}
+
+maintain
+
 # ---------------------------------------------------------------------------
 ACCT="$(env_value accountingServer)"
 NAME="$(env_value nodeName)"
@@ -155,6 +212,26 @@ except Exception:
     pass
 EOF
 )"
+
+# accounting server 可能由根網段的 broker 接手（本機 /api/acct 會回答是誰）：版本也回報給它，狀態頁才看得到。
+# 只回報，jar 一律從 env.json 設定的位址下載，避免從還沒更新的代理 broker 換到舊版。
+python3 - "$ACCT" "$NAME" "$HAVE" "$RUNNING" >/dev/null 2>&1 <<'EOF'
+import json, sys, urllib.parse, urllib.request
+seed, name, have, running = sys.argv[1:5]
+try:
+    info = json.load(urllib.request.urlopen("http://127.0.0.1:8092/api/acct", timeout=3))
+except Exception:
+    sys.exit(0)
+acct = info.get("acct")
+if not acct or acct == seed:
+    sys.exit(0)
+q = urllib.parse.urlencode({"node": name, "have": have, "running": running})
+try:
+    urllib.request.urlopen(f"http://{acct}:8092/dist/hiba-core-0.0.1.jar.md5?{q}", timeout=5).read()
+except Exception:
+    pass
+EOF
+
 if ! [[ "$REMOTE" =~ ^[0-9a-f]{32}$ ]]; then
     echo "accounting server $ACCT 沒有提供版本資訊（連不到，或還是舊版程式），略過"
     exit 0

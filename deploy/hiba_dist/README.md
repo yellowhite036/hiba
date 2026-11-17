@@ -12,6 +12,10 @@ jar 和設定範本不進 git：
 | `hiba-core-0.0.1.jar` | ✘ | 編譯產物，由 Pi 編譯後複製進 `~/hiba_dist` |
 | `template/` | ✘ | 新節點的 env.json 等設定範本，**含區塊鏈私鑰**，只放在 Pi 上 |
 
+這些 `.sh` 也會被 `hiba-core/pom.xml` 打包進 jar 的 `hiba_dist/`。節點的自動更新換上新 jar 後，
+會從 jar 取出新版 `hiba_autoupdate.sh` 自我更新，並順便把 `hiba.service` 改成 `Restart=always`、
+調寬軟體 TPM 的字典攻擊保護，所以已安裝的節點只要 jar 是最新版就好。
+
 ## 更新 Pi 上的 hiba_dist
 
 在 Pi 上編譯完之後：

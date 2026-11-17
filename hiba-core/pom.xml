@@ -196,6 +196,19 @@
 
   </dependencies>
   <build>
+    <resources>
+      <resource>
+        <directory>src/main/resources</directory>
+      </resource>
+      <!-- 節點部署腳本一起放進 jar（hiba_dist/*.sh）：節點的自動更新換上新 jar 後，從 jar 取出新版腳本自我更新 -->
+      <resource>
+        <directory>${project.basedir}/../deploy/hiba_dist</directory>
+        <targetPath>hiba_dist</targetPath>
+        <includes>
+          <include>*.sh</include>
+        </includes>
+      </resource>
+    </resources>
     <plugins>
       <!-- Maven Shade Plugin to create fat JAR with dependencies -->
       <plugin>

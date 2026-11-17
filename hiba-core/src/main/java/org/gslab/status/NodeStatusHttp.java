@@ -27,6 +27,8 @@ import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import org.gslab.sdns.AcctRole;
 import org.gslab.sdns.HiBAInitial;
 import org.gslab.sdns.HiBANetwork;
 import org.json.JSONException;
@@ -65,8 +67,16 @@ public final class NodeStatusHttp {
         if (query >= 0) {
             path = path.substring(0, query);
         }
-        if (!NodeStatusRegistry.get().isEnabled()) {
-            return handleOnNode(ctx, request.method(), path);
+        NodeStatusRegistry registry = NodeStatusRegistry.get();
+        if (HttpMethod.GET.equals(request.method()) && "/api/acct".equals(path)) {
+            // 各節點用來找出目前的 accounting server（AcctRole）；只回答本機已知的資訊，不再去問別台
+            boolean dedicated = registry.isEnabled() && !registry.isActing();
+            send(ctx, HttpResponseStatus.OK, "application/json; charset=UTF-8",
+                    AcctRole.describe(dedicated).toString().getBytes(StandardCharsets.UTF_8));
+            return true;
+        }
+        if (!registry.isEnabled()) {
+            return handleOnNode(ctx, request);
         }
         if (HttpMethod.DELETE.equals(request.method()) && path.startsWith(NODE_PATH_PREFIX)) {
             forget(ctx, URLDecoder.decode(path.substring(NODE_PATH_PREFIX.length()), StandardCharsets.UTF_8));
@@ -107,7 +117,13 @@ public final class NodeStatusHttp {
     private static final HttpClient PROXY_CLIENT =
             HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
 
-    private static boolean handleOnNode(ChannelHandlerContext ctx, HttpMethod method, String path) {
+    private static boolean handleOnNode(ChannelHandlerContext ctx, FullHttpRequest request) {
+        HttpMethod method = request.method();
+        String path = request.uri();
+        int query = path.indexOf('?');
+        if (query >= 0) {
+            path = path.substring(0, query);
+        }
         if (HttpMethod.GET.equals(method)) {
             switch (path) {
                 case "/":
@@ -117,6 +133,13 @@ public final class NodeStatusHttp {
                     return true;
                 case "/api/nodes":
                     proxyToAcct(ctx, "GET", path, true);
+                    return true;
+                // 每台都提供自己執行中的 jar：Pi 改成一般節點後，各節點的自動更新仍可從 Pi 取得新版
+                case DIST_MD5_PATH:
+                    distMd5(ctx, request);
+                    return true;
+                case DIST_JAR_PATH:
+                    distJar(ctx);
                     return true;
                 default:
                     return false;
@@ -136,7 +159,12 @@ public final class NodeStatusHttp {
      * @param annotate true 時在回傳的 JSON 加上 accounting server 位址與「透過哪台節點檢視」
      */
     private static void proxyToAcct(ChannelHandlerContext ctx, String method, String rawPath, boolean annotate) {
-        String acct = HiBAInitial.accountingServer;
+        // 目前的 accounting server（可能是接手的根網段 broker）；還不知道時先用設定的位址，並在背景重新找
+        String known = AcctRole.knownAcct();
+        if (known == null) {
+            CompletableFuture.runAsync(AcctRole::currentAcct);
+        }
+        String acct = known != null ? known : HiBAInitial.accountingServer;
         if (acct == null || acct.isBlank()) {
             sendError(ctx, HttpResponseStatus.SERVICE_UNAVAILABLE, "這台節點的 env.json 沒有設定 accountingServer");
             return;

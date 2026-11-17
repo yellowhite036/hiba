@@ -7,6 +7,7 @@ import java.text.SimpleDateFormat;
 import java.util.HashMap;
 import java.util.Map;
 import org.gslab.Executor;
+import org.gslab.sdns.AcctRole;
 import org.gslab.sdns.HiBAInitial;
 import org.gslab.mService.NTPClient;
 import org.slf4j.Logger;
@@ -71,7 +72,9 @@ public class NTPExecutor extends Executor {
 
     public static String ntpTimeCalculate() {
         long t0 = System.currentTimeMillis();
-        Map<String, Object> response = NTPClient.getNTPTime(HiBAInitial.accountingServer, 9081);
+        // 向目前的 accounting server 對時（可能是接手的根網段 broker，見 AcctRole）
+        String acct = AcctRole.knownAcct();
+        Map<String, Object> response = NTPClient.getNTPTime(acct != null ? acct : HiBAInitial.accountingServer, 9081);
         if (!response.isEmpty()) {
             long t1 = (long) response.get("t1");
             long t2 = (long) response.get("t2");
