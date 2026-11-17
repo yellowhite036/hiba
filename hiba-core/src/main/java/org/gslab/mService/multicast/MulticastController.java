@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.concurrent.TimeUnit;
+import org.gslab.sdns.AcctRole;
 import org.gslab.sdns.HiBAInitial;
 import org.gslab.sdns.HiBANetwork;
 import org.slf4j.Logger;
@@ -42,6 +43,8 @@ public class MulticastController implements Runnable {
      */
 
     private static final Logger LOGGER = LoggerFactory.getLogger(MulticastController.class);
+    // 根網段的節點連續這麼多輪 init 廣播（每輪約 3.5 秒）都沒人回應，就自己當 broker（見 AcctRole）
+    private static final int LONE_ROOT_INIT_ROUNDS = 3;
 
     public static String mode = "init";
     public static final Map<String, Object> initNodeList = new HashMap<>();
@@ -69,6 +72,7 @@ public class MulticastController implements Runnable {
         int checkVoteTimeout = 0;
         int isClientAndNoBrokerBroadcastTimeout = 0;
         int brokerBeaconTick = 0;
+        int loneInitRounds = 0; // 根網段連續幾輪 init 廣播都沒有其他節點回應
         localName = HiBAInitial.nodeName;
 
         startMulticastTime = System.currentTimeMillis();
@@ -146,8 +150,21 @@ public class MulticastController implements Runnable {
                     delay(500);
 
                     if (!initNodeList.isEmpty()) {
+                        loneInitRounds = 0;
                         LOGGER.atInfo().log("Start Connection Stage.");
                         setMode("connection");
+                    } else if (AcctRole.isRootTier() && ++loneInitRounds >= LONE_ROOT_INIT_ROUNDS) {
+                        // 根網段只剩自己（其他節點都離線）：沒有人可以選舉，自己當 broker，
+                        // 根網段才有 broker 擔任 accounting server、讓下層網段接上來。之後有別的節點出現，
+                        // 它會收到本機的 broker 信標而加入；同網段兩個 broker 時由既有的讓位機制處理。
+                        loneInitRounds = 0;
+                        LOGGER.atInfo().log("No other node answered in the root network, local becomes the broker.");
+                        brokerContent.putAll(brokerBeacon());
+                        for (int i = 0; i < HiBAInitial.isBrokerMCASTFrequency; i++) {
+                            MulticastPublisher.sendMulticast(brokerContent);
+                            delay(HiBAInitial.isBrokerMCASTTimeInterval);
+                        }
+                        setMode("isBroker");
                     }
                     break;
 
