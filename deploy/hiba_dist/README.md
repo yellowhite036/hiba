@@ -8,7 +8,8 @@ jar 和設定範本不進 git：
 | `install_node.sh` | ✔ | 在新節點上執行：裝 JDK、建立軟體 TPM、建立 `~/HiBA`、註冊 TPM、設定開機自動啟動，最後呼叫 `setup_node.sh` |
 | `setup_node.sh` | ✔ | 在節點上更新 jar／設定並重啟 HiBA，安裝自動更新計時器（`--status`、`--rollback` 等選項見檔頭） |
 | `hiba_autoupdate.sh` | ✔ | 由 `setup_node.sh` 安裝成 `/usr/local/sbin/hiba-autoupdate`，每 2 分鐘向 accounting server 比對 jar 版本 |
-| `register_node.sh` | ✔ | 在 accounting server 上把節點的 TPM 註冊到 TPMDeviceRegistry（`install_node.sh` 透過 ssh 呼叫） |
+| `register_node.sh` | ✔ | 在 accounting server 上把節點的 TPM 註冊到 TPMDeviceRegistry，第三個參數給錢包位址時一併綁定設備錢包（`install_node.sh` 透過 ssh 呼叫） |
+| `bind_wallets.sh` | ✔ | 在有管理員私鑰的 Pi 上執行：讀各節點 TPM 簽過的錢包聲明（`/api/wallets`），用鏈上公鑰驗章後一次綁定所有節點的設備錢包 |
 | `hiba-core-0.0.1.jar` | ✘ | 編譯產物，由 Pi 編譯後複製進 `~/hiba_dist` |
 | `template/` | ✘ | 新節點的 env.json 等設定範本，**含區塊鏈私鑰**，只放在 Pi 上 |
 

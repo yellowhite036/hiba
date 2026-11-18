@@ -40,8 +40,22 @@ Hyperledger Besu 私有鏈上（QBFT 共識、零手續費、資料存在硬碟�
 | 帳號 | 權限 | 放在 |
 |---|---|---|
 | 管理員（`admin.key`） | 登記、更新公鑰、撤銷設備、管理管理員 | 只放在 Pi 的 `~/HiBA/env.json`，另外離線備份 |
-| 檔案上鏈（`uploader.key`） | 只能寫檔案紀錄、讀鏈 | 各節點的 env.json |
+| 設備錢包（各節點 `~/HiBA/device_wallet.key`） | 綁定到該設備 EK 後才能登記檔案；設備被撤銷就失效 | 各節點自己產生，不離開那台 |
+| 舊的共用上傳帳號（`uploader.key`） | 新版檔案合約不再接受它上鏈，只剩讀鏈 | 節點範本 env.json（相容用） |
 | Besu 驗證節點金鑰（`~/besu/node*/key`） | 參與出塊 | 只放在鏈主機 |
+
+## 設備錢包（哪台設備做的動作）
+
+新版 `FileProtectionContract` 只接受「由管理員綁定到設備 EK、且設備未被撤銷」的錢包登記檔案，
+每筆檔案紀錄會多一個 `FileStoredByDevice` 事件寫出 EK，`/chain` 頁面直接顯示是哪台設備。
+
+- 節點第一次啟動（或 `install_node.sh`）時自動產生 `~/HiBA/device_wallet.key`。
+- 節點每 10 分鐘用 TPM 簽一份「我的錢包是 0x…」送給 accounting server（`GET /api/wallets` 可看）。
+- 一次綁定全部：在 Pi 上 `sudo bash /home/user/hiba_dist/bind_wallets.sh`（會用鏈上公鑰重新驗章，列出後確認才送出）。
+- 單台綁定：`sudo bash ~/hiba_dist/register_node.sh <EK> <公鑰> <錢包位址>`（install_node.sh 會自動帶上）。
+- 換新的檔案合約後，各節點的自動更新會自己改 env.json 的合約位址並重啟 HiBA。
+- 已部署過、只要換檔案合約：`bash deploy_contracts.sh --rpc <RPC> --file-only`（沿用已登記的設備）。
+- 不想用設備錢包（例如測試）：env.json 的 `BlockchainFileProtect.useDeviceWallet` 設為 `false`。
 
 ## 注意
 
