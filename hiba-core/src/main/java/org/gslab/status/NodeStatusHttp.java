@@ -48,7 +48,8 @@ import org.slf4j.LoggerFactory;
  * <li>GET /dist/hiba-core-0.0.1.jar → 下載 jar（見 {@link DistJar}）</li>
  * </ul>
  * <p>每台都有：GET /chain 區塊鏈動作紀錄網頁；GET /api/chain 由 accounting server 回答（{@link ChainActivity}），
- * 一般節點轉送過去。</p>
+ * 一般節點轉送過去。GET /api/wallets 列出各節點 TPM 簽過的設備錢包聲明（{@link WalletAttestation}），
+ * POST /api/wallets 由節點送聲明給 accounting server。</p>
  * <p>一般節點上：同樣提供 GET / 、GET /nodes 網頁，GET /api/nodes 與 DELETE /api/nodes/{name}
  * 轉送給 env.json 設定的 accounting server，所以從任何一台節點都能看狀態頁。</p>
  */
@@ -90,6 +91,10 @@ public final class NodeStatusHttp {
             } else {
                 proxyToAcct(ctx, "GET", path, false);
             }
+            return true;
+        }
+        if ("/api/wallets".equals(path)) {
+            wallets(ctx, request, registry);
             return true;
         }
         if (!registry.isEnabled()) {
@@ -255,6 +260,43 @@ public final class NodeStatusHttp {
                     (resource + " not found in jar").getBytes(StandardCharsets.UTF_8));
         } else {
             send(ctx, HttpResponseStatus.OK, "text/html; charset=UTF-8", page);
+        }
+    }
+
+    /**
+     * 設備錢包聲明（見 {@link WalletAttestation}）。
+     * POST：節點送來 TPM 簽過的聲明，accounting server 驗章後保存；GET：列出（一般節點轉送給 accounting server）。
+     */
+    private static void wallets(ChannelHandlerContext ctx, FullHttpRequest request, NodeStatusRegistry registry) {
+        if (HttpMethod.GET.equals(request.method())) {
+            if (registry.isEnabled()) {
+                send(ctx, HttpResponseStatus.OK, "application/json; charset=UTF-8",
+                        WalletAttestation.toJson().toString().getBytes(StandardCharsets.UTF_8));
+            } else {
+                proxyToAcct(ctx, "GET", "/api/wallets", false);
+            }
+            return;
+        }
+        if (!HttpMethod.POST.equals(request.method())) {
+            sendError(ctx, HttpResponseStatus.METHOD_NOT_ALLOWED, "只接受 GET 或 POST");
+            return;
+        }
+        if (!registry.isEnabled()) {
+            sendError(ctx, HttpResponseStatus.MISDIRECTED_REQUEST, "這台不是 accounting server");
+            return;
+        }
+        String err;
+        try {
+            JSONObject body = new JSONObject(request.content().toString(StandardCharsets.UTF_8));
+            err = WalletAttestation.accept(body, remoteIp(ctx), registry.chainService());
+        } catch (JSONException e) {
+            err = "內容不是 JSON";
+        }
+        if (err == null) {
+            send(ctx, HttpResponseStatus.OK, "application/json; charset=UTF-8",
+                    new JSONObject().put("ok", true).toString().getBytes(StandardCharsets.UTF_8));
+        } else {
+            sendError(ctx, HttpResponseStatus.BAD_REQUEST, err);
         }
     }
 

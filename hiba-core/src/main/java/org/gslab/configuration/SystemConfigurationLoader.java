@@ -2,6 +2,8 @@ package org.gslab.configuration;
 
 import java.io.File;
 import java.math.BigInteger;
+import java.nio.file.Path;
+import org.gslab.util.DeviceWallet;
 import org.gslab.util.JsonFileUtil;
 import org.gslab.fileProtection.config.BlockchainFileProtectManagerConfig;
 import org.gslab.fileProtection.config.BlockchainServiceConfig;
@@ -10,8 +12,14 @@ import org.gslab.fileProtection.config.FileProtectionConfig;
 import org.gslab.fileProtection.config.RetryConfig;
 import org.gslab.sdns.HiBAInitial;
 import org.json.JSONObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.web3j.crypto.Credentials;
+import org.web3j.utils.Numeric;
 
 public class SystemConfigurationLoader {
+
+    private static final Logger logger = LoggerFactory.getLogger(SystemConfigurationLoader.class);
 
     private final JSONObject json;
 
@@ -219,6 +227,18 @@ public class SystemConfigurationLoader {
         String envPrivateKey = getEnv("BLOCKCHAIN_PRIVATE_KEY");
         if (envPrivateKey != null) {
             privateKey = envPrivateKey;
+        } else if (fileProtectJson.optBoolean("useDeviceWallet", true)) {
+            // 檔案上鏈用這台設備自己的錢包（./device_wallet.key，沒有就產生），不用 env.json 裡大家共用的金鑰：
+            // FileProtectionContract 只接受已綁定到設備 EK 的錢包，鏈上才看得出是哪台設備的動作
+            try {
+                Credentials wallet = DeviceWallet.loadOrCreate(Path.of("."));
+                privateKey = Numeric.toHexStringWithPrefixZeroPadded(wallet.getEcKeyPair().getPrivateKey(), 64);
+                logger.atInfo().log(
+                        "File protection uses device wallet {} (must be bound to this device's EK on chain)",
+                        wallet.getAddress());
+            } catch (Exception e) {
+                logger.atWarn().log("Cannot use device wallet ({}), falling back to env.json privateKey", e.getMessage());
+            }
         }
 
         String envContractAddress = getEnv("BLOCKCHAIN_CONTRACT_ADDRESS");

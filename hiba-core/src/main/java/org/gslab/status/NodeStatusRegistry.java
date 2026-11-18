@@ -92,6 +92,11 @@ public final class NodeStatusRegistry {
      *
      * @param address 本機 IP，網頁顯示 accounting server 位址用
      */
+    /** 讀鏈用的 TPMDeviceRegistry 服務（未擔任 accounting server 或沒設定時為 null） */
+    Web3BlockchainService chainService() {
+        return chain;
+    }
+
     public synchronized void enableActing(String name, String address, Web3BlockchainService chain) {
         if (enabled) {
             return;

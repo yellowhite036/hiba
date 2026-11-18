@@ -103,6 +103,9 @@ public class App {
             hibaNetwork.setResourceSources(() -> localResource, resourceList::get);
         }
 
+        // 設備錢包聲明：定期用 TPM 簽章送給 accounting server，管理員可在 Pi 上一次綁定所有節點的錢包
+        org.gslab.status.WalletAttestation.startReporting();
+
         // Start network and thread last to avoid race conditions
         network.start();
         distributeThread.start();
