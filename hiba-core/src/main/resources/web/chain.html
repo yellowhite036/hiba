@@ -138,7 +138,7 @@
     <div class="tile"><div class="n" id="t-dev">–</div><div class="l">鏈上登記的設備</div><div class="sub" id="t-dev-sub"></div></div>
     <div class="tile"><div class="n" id="t-file">–</div><div class="l">受保護的檔案</div><div class="sub muted" id="t-file-sub"></div></div>
     <div class="tile"><div class="n" id="t-last">–</div><div class="l">最近一次動作</div><div class="sub" id="t-last-sub"></div></div>
-    <div class="tile" id="t-anvil-tile"><div class="n" id="t-anvil">–</div><div class="l">用公開測試帳號送出的動作</div><div class="sub muted" id="t-anvil-sub"></div></div>
+    <div class="tile" id="t-rej-tile"><div class="n" id="t-rej">–</div><div class="l">被合約拒絕的嘗試</div><div class="sub muted" id="t-rej-sub"></div></div>
   </section>
 
   <section class="panel" aria-labelledby="chart-title">
@@ -168,6 +168,7 @@
           <button type="button" data-f="all" aria-pressed="true">全部</button>
           <button type="button" data-f="registry" aria-pressed="false">設備管理</button>
           <button type="button" data-f="file" aria-pressed="false">檔案上鏈</button>
+          <button type="button" data-f="rejected" aria-pressed="false">被拒絕</button>
         </div>
         <input type="search" id="q" aria-label="搜尋動作" placeholder="節點、檔名、帳號…" autocomplete="off">
       </div>
@@ -181,7 +182,7 @@
   <footer>
     <div>連線：<span class="mono" id="f-rpc">–</span>・Chain ID <span id="f-chain">–</span>・最新區塊 <span id="f-block">–</span>・<span id="f-scan"></span></div>
     <div>設備註冊合約 <span class="mono" id="f-reg">–</span>・檔案保護合約 <span class="mono" id="f-file">–</span></div>
-    <div>資料由 accounting server 定期讀取合約事件整理而成，只讀鏈、不需要私鑰。點一筆動作可看區塊與交易等細節。</div>
+    <div>資料由 accounting server 定期讀取合約事件整理而成；被合約拒絕的交易沒有事件，另外逐塊找出（回溯最近 7 天）。只讀鏈、不需要私鑰。點一筆動作可看區塊與交易等細節。</div>
   </footer>
 </main>
 
@@ -215,7 +216,7 @@
   const anvilNo = (a) => (a ? ANVIL[String(a).toLowerCase()] : undefined);
 
   // open：展開中的動作（交易編號），每 10 秒重畫時保持展開
-  const state = { chain: null, ekNames: {}, walletEk: {}, filter: "all", q: "", shown: PAGE, error: null, open: new Set() };
+  const state = { chain: null, ekNames: {}, walletEk: {}, bindEvents: [], filter: "all", q: "", shown: PAGE, error: null, open: new Set() };
 
   // ---------- 把同一筆交易的事件合併成一個「動作」 ----------
   function buildActions(events) {
@@ -245,11 +246,68 @@
     return m;
   }
 
+  // ---------- 被合約拒絕的交易（event = "Rejected"，交易失敗、沒有事件） ----------
+  const REASON_ZH = {
+    "Wallet is not bound to a registered device": "錢包沒有綁定到已登記的設備",
+    "Device is revoked or not registered": "設備已撤銷或沒有登記",
+    "Wallet is already bound to another device": "錢包已綁定到其他設備",
+    "Device registry not set": "合約還沒啟用設備檢查",
+    "Only device registry admin": "沒有管理員權限",
+    "Only admin can call": "沒有管理員權限",
+    "Only owner can call": "沒有合約擁有者權限",
+    "Only contract owner": "沒有合約擁有者權限",
+    "Device already registered": "設備已經登記過",
+    "Device not found": "找不到這台設備",
+  };
+  const reasonZh = (r) => {
+    if (!r) return "原因不明";
+    const hit = Object.keys(REASON_ZH).find((k) => r.includes(k));
+    return hit ? REASON_ZH[hit] : r;
+  };
+  const METHOD_ZH = {
+    storeFile: "登記檔案", storeFileWithStruct: "登記檔案", batchStoreFile: "一次登記多個檔案",
+    batchStoreFileWithStruct: "一次登記多個檔案", deleteFile: "刪除檔案紀錄", batchDeleteFile: "刪除多筆檔案紀錄",
+    clearAllFiles: "清空檔案紀錄", destroyContract: "清除合約", bindDeviceWallet: "綁定設備錢包",
+    unbindDeviceWallet: "解除設備錢包", setDeviceRegistry: "設定設備登記合約", registerDevice: "登記設備",
+    registerDeviceWithMetadata: "登記設備", batchRegisterDevices: "批次登記設備", batchRevokeDevices: "批次撤銷設備",
+    updatePublicKey: "更新設備公鑰", updateMetadata: "更新設備資料", revokeDevice: "撤銷設備",
+    reactivateDevice: "恢復設備", addAdmin: "新增管理員", removeAdmin: "移除管理員", transferOwnership: "轉移合約擁有權",
+  };
+  const DEVICE_METHODS = new Set(["bindDeviceWallet", "unbindDeviceWallet", "setDeviceRegistry"]);
+  function rejectText(e) {
+    let what = METHOD_ZH[e.method] || `呼叫 ${e.method || "不明的函式"}`;
+    if (e.fileName) what += ` ${e.fileName}`;
+    else if (e.fileNames && e.fileNames.length) {
+      what += `（${e.fileNames.slice(0, 3).join("、")}${e.fileNames.length > 3 ? " 等" : ""}）`;
+    } else if (e.ek) what += ` ${devName(e.ek)}`;
+    return `嘗試${what}，被拒絕：${reasonZh(e.reason)}`;
+  }
+  // 某個區塊當時，這個錢包綁定給哪台設備（依 DeviceWalletBound／Unbound 事件）
+  function walletEkAt(wallet, block) {
+    const w = String(wallet || "").toLowerCase();
+    let ek = null;
+    for (const e of state.bindEvents) {
+      if (e.block > block) break;
+      if (String(e.account || "").toLowerCase() !== w) continue;
+      if (e.event === "DeviceWalletBound") ek = e.ek;
+      else if (e.event === "DeviceWalletUnbound" && ek === e.ek) ek = null;
+    }
+    return ek;
+  }
+
   function actor(a) {
     const dev = a.events.find((e) => e.event === "FileStoredByDevice" && e.ek);
     if (dev) return `由設備 ${devName(dev.ek)} 送出（錢包 ${short(dev.account || a.from)}）`;
     const from = a.from || (a.events[0] && a.events[0].account);
     if (!from) return "送出帳號不明";
+    if (a.events[0] && a.events[0].event === "Rejected") {
+      const then = walletEkAt(from, a.block);
+      if (then) return `由設備 ${devName(then)} 的錢包 ${short(from)} 送出`;
+      const now = state.walletEk[String(from).toLowerCase()];
+      return now
+        ? `由錢包 ${short(from)} 送出（當時沒有綁定，之後綁定給 ${devName(now)}）`
+        : `由沒有綁定任何設備的錢包 ${short(from)} 送出`;
+    }
     const ek = state.walletEk[String(from).toLowerCase()];
     if (ek) return `由設備 ${devName(ek)} 的錢包 ${short(from)} 送出`;
     const n = anvilNo(from);
@@ -259,6 +317,12 @@
   // 一句話描述這個動作；kind 決定顏色與篩選
   function describe(a) {
     const by = (name) => a.events.filter((e) => e.event === name);
+    const rej = by("Rejected");
+    if (rej.length) {
+      const e = rej[0];
+      const kind = e.contract === "registry" || DEVICE_METHODS.has(e.method) ? "registry" : "file";
+      return { text: rejectText(e), kind, danger: true, rejected: true };
+    }
     const files = by("FileStored");
     const parts = [];
     if (files.length === 1) parts.push(`登記檔案 ${files[0].fileName || "（沒有檔名）"}`);
@@ -339,12 +403,18 @@
     $("t-last").textContent = last ? ago(last.time) : "–";
     $("t-last-sub").textContent = last ? describe(last).text : "鏈上還沒有任何動作";
 
-    const anvil = actions.filter((a) => anvilNo(a.from) !== undefined).length;
-    $("t-anvil").textContent = anvil;
-    $("t-anvil-tile").classList.toggle("warn", anvil > 0);
-    $("t-anvil-sub").innerHTML = anvil
-      ? `<span class="badge b-warn">⚠ 私鑰公開</span> 任何人都能用同一個帳號送出`
-      : "沒有";
+    const rej = actions.filter((a) => describe(a).rejected);
+    const scan = (state.chain && state.chain.rejectionScan) || {};
+    const latest = state.chain ? Number(state.chain.latestBlock) : -1;
+    const behind = scan.nextBlock >= 0 && latest > 0 && latest - scan.nextBlock > 30;
+    const progress = behind && scan.fromBlock >= 0
+      ? `回溯掃描中 ${Math.floor(((scan.nextBlock - scan.fromBlock) / Math.max(1, latest - scan.fromBlock)) * 100)}%`
+      : `最近 ${scan.lookbackDays || 7} 天`;
+    $("t-rej").textContent = rej.length;
+    $("t-rej-tile").classList.toggle("warn", rej.length > 0);
+    $("t-rej-sub").innerHTML = rej.length
+      ? `<span class="badge b-bad">${esc(ago(rej[0].time))}</span> ${esc(reasonZh(rej[0].events[0].reason))}`
+      : `${esc(progress)}沒有被拒絕的交易`;
   }
 
   // 依時間分組：跨距 60 天內按日，否則按月；只畫最近 24 組
@@ -356,7 +426,7 @@
     const keyOf = (ms) => (byMonth ? dateOf(ms).slice(0, 7) : dateOf(ms));
     const map = new Map();
     actions.forEach((a) => {
-      if (!a.time) return;
+      if (!a.time || describe(a).rejected) return;
       const k = keyOf(a.time);
       if (!map.has(k)) map.set(k, { key: k, registry: 0, file: 0 });
       map.get(k)[describe(a).kind] += 1;
@@ -455,7 +525,7 @@
     const q = state.q.toLowerCase();
     const list = actions.filter((a) => {
       const d = describe(a);
-      if (state.filter !== "all" && d.kind !== state.filter) return false;
+      if (state.filter === "rejected" ? !d.rejected : state.filter !== "all" && d.kind !== state.filter) return false;
       if (!q) return true;
       return [d.text, actor(a), a.from, a.tx, ...a.events.map((e) => [e.fileName, e.fileHash, e.ek, e.account].join(" "))]
         .some((v) => v && String(v).toLowerCase().includes(q));
@@ -478,7 +548,8 @@
           <dt>送出帳號</dt><dd class="mono">${esc(a.from || "–")}</dd>
           ${a.events.filter((e) => e.fileHash).map((e) => `<dt>${esc(e.fileName || "檔案")}</dt><dd class="mono">SHA-256 ${esc(e.fileHash)}</dd>`).join("")}
           ${a.events.filter((e) => e.ek).map((e) => `<dt>${esc(devName(e.ek))}</dt><dd class="mono">EK ${esc(e.ek)}</dd>`).join("")}
-          <dt>原始事件</dt><dd>${a.events.map((e) => esc(e.event)).join("、")}</dd>
+          ${a.events.filter((e) => e.event === "Rejected").map((e) => `<dt>呼叫的函式</dt><dd class="mono">${esc(e.method || "–")}</dd><dt>拒絕原因</dt><dd>${esc(e.reason || "不明")}</dd>`).join("")}
+          <dt>原始事件</dt><dd>${a.events.map((e) => esc(e.event === "Rejected" ? "交易失敗（合約拒絕，沒有事件）" : e.event)).join("、")}</dd>
         </dl>
       </details>`;
     });
@@ -504,6 +575,9 @@
     const c = state.chain;
     if (!c) return;
     state.walletEk = walletMap(c.events || []);
+    state.bindEvents = (c.events || [])
+      .filter((e) => e.event === "DeviceWalletBound" || e.event === "DeviceWalletUnbound")
+      .sort((x, y) => x.block - y.block || (x.logIndex || 0) - (y.logIndex || 0));
     const actions = buildActions(c.events || []);
     const devices = buildDevices(c.events || []);
     renderTiles(actions, devices, c.events || []);

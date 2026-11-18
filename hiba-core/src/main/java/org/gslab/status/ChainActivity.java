@@ -23,16 +23,24 @@ import org.web3j.abi.FunctionReturnDecoder;
 import org.web3j.abi.TypeReference;
 import org.web3j.abi.datatypes.Address;
 import org.web3j.abi.datatypes.Bool;
+import org.web3j.abi.datatypes.DynamicArray;
 import org.web3j.abi.datatypes.Event;
 import org.web3j.abi.datatypes.Type;
 import org.web3j.abi.datatypes.Utf8String;
 import org.web3j.abi.datatypes.generated.Uint256;
+import org.web3j.crypto.Hash;
 import org.web3j.protocol.Web3j;
+import org.web3j.protocol.core.BatchRequest;
+import org.web3j.protocol.core.BatchResponse;
 import org.web3j.protocol.core.DefaultBlockParameter;
+import org.web3j.protocol.core.Response;
 import org.web3j.protocol.core.methods.request.EthFilter;
+import org.web3j.protocol.core.methods.request.Transaction;
 import org.web3j.protocol.core.methods.response.EthBlock;
+import org.web3j.protocol.core.methods.response.EthCall;
 import org.web3j.protocol.core.methods.response.EthLog;
 import org.web3j.protocol.core.methods.response.Log;
+import org.web3j.protocol.core.methods.response.TransactionReceipt;
 import org.web3j.protocol.http.HttpService;
 
 /**
@@ -42,6 +50,11 @@ import org.web3j.protocol.http.HttpService;
  * 只讀鏈，不需要私鑰。RPC 與合約位址讀自 env.json（Blockchain.rpcURL、BlockchainTPMRegistry.contractAddress、
  * BlockchainFileProtect.contractAddress），也接受和 SystemConfigurationLoader 相同的環境變數覆蓋。
  * 只在本機擔任 accounting server（{@link NodeStatusRegistry#isEnabled()}）時掃描。
+ * </p>
+ * <p>
+ * 被合約拒絕（revert）的交易不會留下事件，所以另外逐塊檢查送到這兩份合約、但執行失敗的交易，
+ * 記為 event = "Rejected"（含呼叫的函式、送出錢包、拒絕原因）。例如未綁定或已撤銷設備的錢包嘗試登記檔案。
+ * 只回溯最近 {@value #REJECT_LOOKBACK_DAYS} 天（accounting server 重啟後重新掃描這段），之後逐塊跟上。
  * </p>
  */
 public final class ChainActivity {
@@ -53,6 +66,33 @@ public final class ChainActivity {
     private static final long BLOCK_CHUNK = 5000; // 一次 eth_getLogs 查詢的區塊數
     private static final int MAX_EVENTS = 1000; // 記憶體裡保留的最新事件數
     private static final int MAX_CACHE = 5000;
+
+    // 被拒絕的交易：逐塊掃描（QBFT 每 2 秒一塊）
+    private static final int REJECT_LOOKBACK_DAYS = 7;
+    private static final long REJECT_LOOKBACK_BLOCKS = REJECT_LOOKBACK_DAYS * 24L * 3600 / 2;
+    private static final int HEADER_BATCH = 200; // 一次批次 RPC 讀幾個區塊
+    private static final long REJECT_BLOCKS_PER_SCAN = 4_000; // 每輪最多掃幾塊：第一次回溯分多輪做，事件紀錄仍每 10 秒左右更新
+    private static final int MAX_REJECTIONS = 500; // 和一般事件分開保存，大量失敗嘗試不會把正常紀錄擠掉
+
+    /** 函式 selector → 函式名稱（解讀被拒絕的交易在呼叫什麼） */
+    private static final Map<String, String> METHODS = new HashMap<>();
+
+    static {
+        for (String sig : List.of(
+                "storeFile(string,string,string,string,uint256,string,string)",
+                "storeFileWithStruct((string,string,string,string,uint256,string,string))",
+                "batchStoreFile(string[],string[],string[],string[],uint256[],string[],string[])",
+                "batchStoreFileWithStruct((string,string,string,string,uint256,string,string)[])",
+                "deleteFile(string)", "batchDeleteFile(string[])", "clearAllFiles()", "destroyContract()",
+                "setDeviceRegistry(address)", "bindDeviceWallet(string,address)", "unbindDeviceWallet(string)",
+                "registerDevice(string,string)", "registerDeviceWithMetadata(string,string,string)",
+                "batchRegisterDevices(string[],string[])", "batchRevokeDevices(string[])",
+                "updatePublicKey(string,string)", "updateMetadata(string,string)",
+                "revokeDevice(string)", "reactivateDevice(string)",
+                "addAdmin(address)", "removeAdmin(address)", "transferOwnership(address)")) {
+            METHODS.put(Hash.sha3String(sig).substring(0, 10), sig.substring(0, sig.indexOf('(')));
+        }
+    }
 
     /** 一種事件：名稱、所屬合約、ABI 定義 */
     private record Def(String name, String contract, Event event) {}
@@ -98,6 +138,10 @@ public final class ChainActivity {
     private final Deque<JSONObject> events = new ArrayDeque<>(); // 新的在前，存取時要 synchronized
     private final Map<BigInteger, Long> blockTimes = lru();
     private final Map<String, String> txSenders = lru();
+    private final Deque<JSONObject> rejections = new ArrayDeque<>(); // 存取時要 synchronized
+    private BigInteger nextRejectBlock = null; // null：還沒開始（第一次從最新區塊往前回溯）
+    private volatile long rejectScanFrom = -1;
+    private volatile long rejectScanNext = -1;
 
     private volatile long chainId = -1;
     private volatile long latestBlock = -1;
@@ -191,6 +235,10 @@ public final class ChainActivity {
                     }
                     blockTimes.clear();
                     txSenders.clear();
+                    synchronized (rejections) {
+                        rejections.clear();
+                    }
+                    nextRejectBlock = null;
                 }
                 while (nextBlock.compareTo(latest) <= 0) {
                     BigInteger to = nextBlock.add(BigInteger.valueOf(BLOCK_CHUNK - 1)).min(latest);
@@ -207,6 +255,7 @@ public final class ChainActivity {
                     }
                     nextBlock = to.add(BigInteger.ONE);
                 }
+                scanRejections(latest);
             }
             latestBlock = latest.longValue();
             lastScanAt = System.currentTimeMillis();
@@ -260,6 +309,178 @@ public final class ChainActivity {
             while (events.size() > MAX_EVENTS) {
                 events.removeLast();
             }
+        }
+    }
+
+    // ============ 被合約拒絕的交易 ============
+
+    private void scanRejections(BigInteger latest) throws Exception {
+        if (nextRejectBlock == null) {
+            nextRejectBlock = latest.subtract(BigInteger.valueOf(REJECT_LOOKBACK_BLOCKS)).max(BigInteger.ZERO);
+            rejectScanFrom = nextRejectBlock.longValue();
+        }
+        BigInteger end = nextRejectBlock.add(BigInteger.valueOf(REJECT_BLOCKS_PER_SCAN - 1)).min(latest);
+        while (nextRejectBlock.compareTo(end) <= 0) {
+            BigInteger to = nextRejectBlock.add(BigInteger.valueOf(HEADER_BATCH - 1)).min(end);
+            BatchRequest batch = web3j.newBatch();
+            for (BigInteger b = nextRejectBlock; b.compareTo(to) <= 0; b = b.add(BigInteger.ONE)) {
+                batch.add(web3j.ethGetBlockByNumber(DefaultBlockParameter.valueOf(b), true));
+            }
+            BatchResponse response = batch.send();
+            for (Response<?> r : response.getResponses()) {
+                if (r.hasError()) {
+                    throw new IllegalStateException(r.getError().getMessage());
+                }
+                if (r instanceof EthBlock eb && eb.getBlock() != null) {
+                    checkBlock(eb.getBlock());
+                }
+            }
+            nextRejectBlock = to.add(BigInteger.ONE);
+            rejectScanNext = nextRejectBlock.longValue();
+        }
+    }
+
+    private void checkBlock(EthBlock.Block block) throws Exception {
+        List<EthBlock.TransactionResult> txs = block.getTransactions();
+        if (txs == null || txs.isEmpty()) {
+            return;
+        }
+        for (EthBlock.TransactionResult result : txs) {
+            if (!(result.get() instanceof EthBlock.TransactionObject tx) || tx.getTo() == null) {
+                continue;
+            }
+            String contract;
+            if (tx.getTo().equalsIgnoreCase(fileAddress)) {
+                contract = "file";
+            } else if (tx.getTo().equalsIgnoreCase(registryAddress)) {
+                contract = "registry";
+            } else {
+                continue;
+            }
+            TransactionReceipt receipt =
+                    web3j.ethGetTransactionReceipt(tx.getHash()).send().getTransactionReceipt().orElse(null);
+            if (receipt == null || receipt.isStatusOK()) {
+                continue;
+            }
+            long time = block.getTimestamp() == null ? 0 : block.getTimestamp().longValue() * 1000;
+            blockTimes.put(block.getNumber(), time);
+            String input = tx.getInput() == null ? "" : tx.getInput();
+            String selector = input.length() >= 10 ? input.substring(0, 10).toLowerCase() : "";
+            String method = METHODS.getOrDefault(selector, "unknown");
+            String reason = receipt.getRevertReason();
+            if (reason == null || reason.isBlank()) {
+                reason = replayRevertReason(tx, block.getNumber());
+            }
+            JSONObject e = new JSONObject()
+                    .put("block", block.getNumber().longValue())
+                    .put("logIndex", tx.getTransactionIndex() == null ? 0 : tx.getTransactionIndex().longValue())
+                    .put("tx", tx.getHash())
+                    .put("contract", contract)
+                    .put("event", "Rejected")
+                    .put("time", time)
+                    .put("from", tx.getFrom())
+                    .put("account", tx.getFrom())
+                    .put("method", method)
+                    .put("reason", reason == null ? JSONObject.NULL : cleanReason(reason));
+            describeArgs(e, method, input);
+            synchronized (rejections) {
+                rejections.addFirst(e);
+                while (rejections.size() > MAX_REJECTIONS) {
+                    rejections.removeLast();
+                }
+            }
+        }
+    }
+
+    /** 收據沒有 revertReason（Besu 預設不記）時，在前一個區塊的狀態上重跑一次呼叫取得原因 */
+    private String replayRevertReason(EthBlock.TransactionObject tx, BigInteger block) {
+        try {
+            EthCall call = web3j.ethCall(
+                            Transaction.createEthCallTransaction(tx.getFrom(), tx.getTo(), tx.getInput()),
+                            DefaultBlockParameter.valueOf(block.subtract(BigInteger.ONE).max(BigInteger.ZERO)))
+                    .send();
+            if (call.hasError()) {
+                String decoded = decodeError(call.getError().getData());
+                return decoded != null ? decoded : call.getError().getMessage();
+            }
+            String decoded = decodeError(call.getValue());
+            return decoded != null ? decoded : call.getRevertReason();
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    /** 解出 Error(string) 的訊息（revert 資料以 0x08c379a0 開頭） */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static String decodeError(String data) {
+        if (data == null) {
+            return null;
+        }
+        String hex = data.trim().replace("\"", "");
+        if (!hex.toLowerCase().startsWith("0x08c379a0") || hex.length() < 10 + 128) {
+            return null;
+        }
+        try {
+            List<Type> out = FunctionReturnDecoder.decode(
+                    "0x" + hex.substring(10), (List) List.of(new TypeReference<Utf8String>() {}));
+            return out.isEmpty() ? null : String.valueOf(out.get(0).getValue());
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    private static final java.util.regex.Pattern EXECUTION_REVERTED =
+            java.util.regex.Pattern.compile("(?i)^execution reverted[:(\\s]*(.*?)\\)?$");
+
+    /** "Execution reverted (Wallet is not bound…)" → "Wallet is not bound…" */
+    private static String cleanReason(String reason) {
+        String r = reason.trim();
+        java.util.regex.Matcher m = EXECUTION_REVERTED.matcher(r);
+        if (m.matches() && !m.group(1).isBlank()) {
+            return m.group(1).trim();
+        }
+        return r;
+    }
+
+    /** 從呼叫參數取出可讀的資訊：檔名、EK */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void describeArgs(JSONObject e, String method, String input) {
+        if (input.length() <= 10) {
+            return;
+        }
+        String args = "0x" + input.substring(10);
+        try {
+            switch (method) {
+                case "storeFile" -> {
+                    List<Type> v = FunctionReturnDecoder.decode(args, (List) List.of(
+                            new TypeReference<Utf8String>() {}, new TypeReference<Utf8String>() {}));
+                    if (v.size() > 1) {
+                        e.put("fileName", String.valueOf(v.get(1).getValue()));
+                    }
+                }
+                case "batchStoreFile" -> {
+                    List<Type> v = FunctionReturnDecoder.decode(args, (List) List.of(
+                            new TypeReference<DynamicArray<Utf8String>>() {},
+                            new TypeReference<DynamicArray<Utf8String>>() {}));
+                    if (v.size() > 1 && v.get(1) instanceof DynamicArray<?> names) {
+                        JSONArray list = new JSONArray();
+                        for (Object n : names.getValue()) {
+                            list.put(String.valueOf(((Type) n).getValue()));
+                        }
+                        e.put("fileNames", list);
+                    }
+                }
+                case "bindDeviceWallet", "unbindDeviceWallet", "registerDevice", "registerDeviceWithMetadata",
+                        "updatePublicKey", "updateMetadata", "revokeDevice", "reactivateDevice" -> {
+                    List<Type> v = FunctionReturnDecoder.decode(args, (List) List.of(new TypeReference<Utf8String>() {}));
+                    if (!v.isEmpty()) {
+                        e.put("ek", String.valueOf(v.get(0).getValue()));
+                    }
+                }
+                default -> {}
+            }
+        } catch (Exception ignored) {
+            // 參數格式不符（例如亂送的資料）：只顯示函式與原因
         }
     }
 
@@ -324,6 +545,9 @@ public final class ChainActivity {
         synchronized (events) {
             list = new JSONArray(new ArrayList<>(events));
         }
+        synchronized (rejections) {
+            rejections.forEach(list::put);
+        }
         return new JSONObject()
                 .put("generatedAt", System.currentTimeMillis())
                 .put("rpcUrl", rpcUrl)
@@ -335,6 +559,10 @@ public final class ChainActivity {
                 .put("contracts", new JSONObject()
                         .put("registry", registryAddress.isBlank() ? JSONObject.NULL : registryAddress)
                         .put("file", fileAddress.isBlank() ? JSONObject.NULL : fileAddress))
+                .put("rejectionScan", new JSONObject()
+                        .put("lookbackDays", REJECT_LOOKBACK_DAYS)
+                        .put("fromBlock", rejectScanFrom)
+                        .put("nextBlock", rejectScanNext))
                 .put("events", list);
     }
 }
