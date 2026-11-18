@@ -406,6 +406,28 @@ if [ "$RC" = "True" ] && [ ! -f "/home/$(whoami)/.ssh/id_rsa.pub" ]; then
     mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
     ssh-keygen -t rsa -b 3072 -N '' -q -f "$HOME/.ssh/id_rsa" && ok "已建立 ~/.ssh/id_rsa（reverseChannel 需要）"
 fi
+if [ "$RC" = "True" ]; then
+    # 本機當上 broker 時，下層 broker 要 ssh 進來建立反向通道（跨網段傳檔用）。HiBA 把下層的公鑰寫在
+    # $DIR/auth_ch（只能轉發 port），要讓 sshd 也讀這個檔；只套用在本帳號，保留原本的 authorized_keys
+    if ! command -v sshd >/dev/null && [ ! -x /usr/sbin/sshd ]; then
+        wait_apt
+        sudo DEBIAN_FRONTEND=noninteractive apt-get $APT_LOCK install -y -qq openssh-server >/dev/null \
+            && ok "已安裝 openssh-server" || warn "安裝 openssh-server 失敗，下層 broker 無法建立反向通道"
+    fi
+    chmod go-w "$HOME" "$DIR" 2>/dev/null # sshd StrictModes：路徑上的目錄不能讓別人寫入
+    SSHD_DROPIN="/etc/ssh/sshd_config.d/hiba-reverse-channel.conf"
+    printf '# HiBA：下層 broker 建立反向通道用的金鑰（%s/auth_ch，只能轉發 port）\nMatch User %s\n    AuthorizedKeysFile .ssh/authorized_keys %s/auth_ch\n' \
+        "$DIR" "$(whoami)" "$DIR" | sudo tee "$SSHD_DROPIN" >/dev/null
+    if ! grep -qsE '^\s*Include\s+/etc/ssh/sshd_config\.d/' /etc/ssh/sshd_config; then
+        warn "/etc/ssh/sshd_config 沒有 Include sshd_config.d，$SSHD_DROPIN 不會生效"
+    elif sudo sshd -t 2>/dev/null || sudo /usr/sbin/sshd -t 2>/dev/null; then
+        sudo systemctl reload ssh 2>/dev/null || sudo systemctl reload sshd 2>/dev/null
+        ok "sshd 會讀 $DIR/auth_ch（反向通道）"
+    else
+        sudo rm -f "$SSHD_DROPIN"
+        warn "sshd 設定檢查失敗，已移除 $SSHD_DROPIN"
+    fi
+fi
 
 # ---------------------------------------------------------------------------
 step "5. 上鏈註冊 TPM"

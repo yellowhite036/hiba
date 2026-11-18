@@ -33,7 +33,12 @@ public class ReverseSSHTunnelManager implements AutoCloseable {
                     "-o",
                     "ServerAliveCountMax=3",
                     "-o",
-                    "ExitOnForwardFailure=yes");
+                    "ExitOnForwardFailure=yes",
+                    // 背景執行沒有終端機：不要停在密碼或「是否信任這台主機」的提示上
+                    "-o",
+                    "BatchMode=yes",
+                    "-o",
+                    "StrictHostKeyChecking=accept-new");
 
             // 重定向輸出到日誌
             pb.redirectOutput(new File("./logs/reverse_ssh_tunnel.log"));

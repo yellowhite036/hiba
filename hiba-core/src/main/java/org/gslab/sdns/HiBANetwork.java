@@ -778,9 +778,20 @@ public class HiBANetwork implements SdnNetwork {
                 authFile.close();
             } else {
                 FileWriter authFile = new FileWriter("./auth_ch", true);
-                authFile.write(pubKey + "\n");
+                // 下層 broker 的金鑰只能用來建立反向通道（-R 轉發 port），不能登入 shell 或做其他轉發
+                String key = pubKey.trim();
+                boolean hasOptions = !(key.startsWith("ssh-") || key.startsWith("ecdsa-") || key.startsWith("sk-"));
+                authFile.write((hasOptions ? key : "restrict,port-forwarding " + key) + "\n");
                 authFile.flush();
                 authFile.close();
+            }
+            // sshd 的 StrictModes：授權金鑰檔不能讓其他人寫入，否則整個檔案會被忽略
+            try {
+                java.nio.file.Files.setPosixFilePermissions(
+                        java.nio.file.Path.of("./auth_ch"),
+                        java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+            } catch (UnsupportedOperationException | java.io.IOException ignored) {
+                // Windows 等不支援 POSIX 權限的系統
             }
             return true;
         } catch (Exception e) {
@@ -1392,10 +1403,13 @@ public class HiBANetwork implements SdnNetwork {
                     port,
                     clientDeviceName);
 
+            // 上層 broker 回傳的是它的作業系統帳號（HiBAInitial.sysName）。以前寫死 "user"，
+            // 只有上層剛好用 user 帳號（例如 Pi）才建得起來，其他帳號（例如 VM 的 abcd）會失敗
+            String sshUser = clientDeviceName != null && !clientDeviceName.isBlank() ? clientDeviceName : "user";
             boolean result = sshTunnelManager.createTunnel(
                     String.valueOf(HiBAInitial.DATA_PORT), // local port
                     String.valueOf(port), // remote port
-                    "user", // SSH user
+                    sshUser, // SSH user
                     clientAddress // SSH host
                     );
 

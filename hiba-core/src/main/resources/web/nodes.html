@@ -871,7 +871,7 @@
     let html = "";
     if (state.error) html = `${icon("alert")}<span>無法取得節點資料（${esc(state.error)}），持續重試中。</span>`;
     else if (d && !d.accountingServer) html = `${icon("alert")}<span>這台不是 accounting server，沒有節點總表。請改開 accounting server 的這個頁面。</span>`;
-    else if (d && !d.chainStatus.ok && d.chainStatus.error) html = `${icon("alert")}<span>區塊鏈讀取失敗，「鏈上註冊」暫時無法判斷。</span>`;
+    else if (d && !d.chainStatus.ok && d.chainStatus.error) html = `${icon("alert")}<span>區塊鏈讀取失敗，「鏈上註冊」暫時無法判斷（${esc(d.chainStatus.error)}）。</span>`;
     else if (d) {
       const groups = {};
       d.nodes.filter((n) => n.status === "online" && n.role === "broker" && !n.broker).forEach((n) => {

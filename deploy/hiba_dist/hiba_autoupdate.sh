@@ -174,6 +174,27 @@ maintain() {
             && systemctl daemon-reload && log "hiba.service 已改為 Restart=always"
     fi
 
+    # 2b. 反向通道（跨網段傳檔）：下層 broker 的公鑰寫在 $DIR/auth_ch，sshd 要讀這個檔才接受它們 ssh 進來
+    if [ "$(env_value reverseChannel)" = "True" ] && { command -v sshd >/dev/null || [ -x /usr/sbin/sshd ]; } \
+        && grep -qsE '^\s*Include\s+/etc/ssh/sshd_config\.d/' /etc/ssh/sshd_config; then
+        local dropin="/etc/ssh/sshd_config.d/hiba-reverse-channel.conf" want
+        want="$(printf '# HiBA：下層 broker 建立反向通道用的金鑰（%s/auth_ch，只能轉發 port）\nMatch User %s\n    AuthorizedKeysFile .ssh/authorized_keys %s/auth_ch\n' \
+            "$DIR" "$HIBA_USER" "$DIR")"
+        if [ "$(cat "$dropin" 2>/dev/null)" != "$want" ]; then
+            printf '%s\n' "$want" > "$dropin"
+            if /usr/sbin/sshd -t 2>/dev/null || sshd -t 2>/dev/null; then
+                systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null
+                log "sshd 已設定讀取 $DIR/auth_ch（反向通道）"
+            else
+                rm -f "$dropin"
+                log "sshd 設定檢查失敗，沒有啟用反向通道設定"
+            fi
+        fi
+        # sshd StrictModes：家目錄、HiBA 目錄、auth_ch 都不能讓別人寫入，否則金鑰會被忽略
+        chmod go-w "$(getent passwd "$HIBA_USER" | cut -d: -f6)" "$DIR" 2>/dev/null
+        [ -f "$DIR/auth_ch" ] && chmod 600 "$DIR/auth_ch"
+    fi
+
     # 3. 軟體 TPM：非正常關機（斷電、強制關 VM）會算一次授權失敗，預設 3 次就鎖住、簽章全部失敗
     if [ -f "$SWTPM_UNIT_FILE" ] && command -v tpm2_dictionarylockout >/dev/null 2>&1; then
         local caps
