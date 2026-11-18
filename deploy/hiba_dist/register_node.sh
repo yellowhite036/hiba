@@ -24,12 +24,17 @@ for c in "$(command -v cast 2>/dev/null)" "$HOME/.foundry/bin/cast" /home/soc/.f
 done
 [ -n "$CAST" ] || fail "找不到 cast（Foundry）。soc 帳號裝過：請用 sudo 執行，或安裝 Foundry"
 
-read -r RPC CONTRACT KEY < <(python3 -c '
+read -r RPC CONTRACT KEY GAS_PRICE < <(python3 -c '
 import json, sys
 d = json.load(open(sys.argv[1]))
 k = d["BlockchainTPMRegistry"]["privateKey"]
-print(d["Blockchain"]["rpcURL"], d["BlockchainTPMRegistry"]["contractAddress"], k if k.startswith("0x") else "0x" + k)' "$ENV_JSON") \
+print(d["Blockchain"]["rpcURL"], d["BlockchainTPMRegistry"]["contractAddress"], k if k.startswith("0x") else "0x" + k,
+      d["Blockchain"].get("gasPrice", ""))' "$ENV_JSON") \
     || fail "無法從 $ENV_JSON 讀取 Blockchain / BlockchainTPMRegistry 設定"
+
+# 零手續費的私有鏈（Besu，gasPrice=0）：送 gasPrice 0 的舊式交易，帳號不需要有餘額
+FEE_OPTS=()
+[ "$GAS_PRICE" = 0 ] && FEE_OPTS=(--legacy --gas-price 0)
 
 echo "  合約 $CONTRACT  RPC $RPC"
 echo "  EK  $EK"
@@ -50,11 +55,11 @@ if [ "$REGISTERED" = true ]; then
     fi
     echo "  已註冊但公鑰不同 → updatePublicKey"
     "$CAST" send "$CONTRACT" "updatePublicKey(string,string)" "$EK" "$PUB" \
-        --rpc-url "$RPC" --private-key "$KEY" >/dev/null || fail "updatePublicKey 交易失敗"
+        --rpc-url "$RPC" --private-key "$KEY" "${FEE_OPTS[@]}" >/dev/null || fail "updatePublicKey 交易失敗"
 else
     echo "  尚未註冊 → registerDevice"
     "$CAST" send "$CONTRACT" "registerDevice(string,string)" "$EK" "$PUB" \
-        --rpc-url "$RPC" --private-key "$KEY" >/dev/null || fail "registerDevice 交易失敗"
+        --rpc-url "$RPC" --private-key "$KEY" "${FEE_OPTS[@]}" >/dev/null || fail "registerDevice 交易失敗"
 fi
 
 CUR="$("$CAST" call "$CONTRACT" "getPublicKey(string)(string)" "$EK" --rpc-url "$RPC" | strip)"

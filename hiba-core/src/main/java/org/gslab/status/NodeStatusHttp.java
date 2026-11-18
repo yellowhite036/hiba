@@ -47,6 +47,8 @@ import org.slf4j.LoggerFactory;
  *     節點的自動更新程式（hiba_autoupdate.sh）每次檢查時呼叫，順便回報自己的版本</li>
  * <li>GET /dist/hiba-core-0.0.1.jar → 下載 jar（見 {@link DistJar}）</li>
  * </ul>
+ * <p>每台都有：GET /chain 區塊鏈動作紀錄網頁；GET /api/chain 由 accounting server 回答（{@link ChainActivity}），
+ * 一般節點轉送過去。</p>
  * <p>一般節點上：同樣提供 GET / 、GET /nodes 網頁，GET /api/nodes 與 DELETE /api/nodes/{name}
  * 轉送給 env.json 設定的 accounting server，所以從任何一台節點都能看狀態頁。</p>
  */
@@ -54,6 +56,7 @@ public final class NodeStatusHttp {
 
     private static final Logger logger = LoggerFactory.getLogger(NodeStatusHttp.class);
     private static final String PAGE_RESOURCE = "/web/nodes.html";
+    private static final String CHAIN_PAGE_RESOURCE = "/web/chain.html";
     private static final String NODE_PATH_PREFIX = "/api/nodes/";
     private static final String DIST_JAR_PATH = "/dist/" + DistJar.FILE_NAME;
     private static final String DIST_MD5_PATH = DIST_JAR_PATH + ".md5";
@@ -73,6 +76,20 @@ public final class NodeStatusHttp {
             boolean dedicated = registry.isEnabled() && !registry.isActing();
             send(ctx, HttpResponseStatus.OK, "application/json; charset=UTF-8",
                     AcctRole.describe(dedicated).toString().getBytes(StandardCharsets.UTF_8));
+            return true;
+        }
+        if (HttpMethod.GET.equals(request.method()) && ("/chain".equals(path) || "/chain/".equals(path))) {
+            // 區塊鏈動作紀錄網頁：每台都提供，資料（/api/chain）由 accounting server 回答或轉送過去
+            sendHtml(ctx, CHAIN_PAGE_RESOURCE);
+            return true;
+        }
+        if (HttpMethod.GET.equals(request.method()) && "/api/chain".equals(path)) {
+            if (registry.isEnabled()) {
+                send(ctx, HttpResponseStatus.OK, "application/json; charset=UTF-8",
+                        ChainActivity.get().toJson().toString().getBytes(StandardCharsets.UTF_8));
+            } else {
+                proxyToAcct(ctx, "GET", path, false);
+            }
             return true;
         }
         if (!registry.isEnabled()) {
@@ -228,10 +245,14 @@ public final class NodeStatusHttp {
     }
 
     private static void sendPage(ChannelHandlerContext ctx) {
-        byte[] page = loadResource(PAGE_RESOURCE);
+        sendHtml(ctx, PAGE_RESOURCE);
+    }
+
+    private static void sendHtml(ChannelHandlerContext ctx, String resource) {
+        byte[] page = loadResource(resource);
         if (page == null) {
             send(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR, "text/plain; charset=UTF-8",
-                    "nodes.html not found in jar".getBytes(StandardCharsets.UTF_8));
+                    (resource + " not found in jar").getBytes(StandardCharsets.UTF_8));
         } else {
             send(ctx, HttpResponseStatus.OK, "text/html; charset=UTF-8", page);
         }

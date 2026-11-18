@@ -134,6 +134,7 @@ public final class NodeStatusRegistry {
         } else {
             scheduler.execute(this::refreshChain);
         }
+        ChainActivity.get().start(); // 區塊鏈動作紀錄（/chain）
     }
 
     public boolean isEnabled() {

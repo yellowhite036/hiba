@@ -24,6 +24,7 @@ import org.web3j.protocol.websocket.WebSocketService;
 import org.web3j.tx.TransactionManager;
 import org.web3j.tx.exceptions.ContractCallException;
 import org.web3j.tx.gas.DefaultGasProvider;
+import org.web3j.tx.gas.StaticGasProvider;
 
 /**
  * Web3j implementation of BlockchainService for real Ethereum blockchain interaction
@@ -86,7 +87,15 @@ public class Web3jBlockchainServiceImpl implements BlockchainService {
         this.credentials = Credentials.create(privateKey);
 
         // Initialize contract with faster polling for local networks
-        DefaultGasProvider gasProvider = new DefaultGasProvider();
+        // 用 env.json 的 Blockchain.gasPrice / gasLimit（以前寫死 DefaultGasProvider 的 4.1 gwei：
+        // Anvil 測試帳號有餘額所以沒事，零手續費的私有鏈（Besu，gasPrice=0）上帳號沒有餘額，交易會被拒絕）
+        BigInteger gasPrice = config.getGasPrice() >= 0
+                ? BigInteger.valueOf(config.getGasPrice())
+                : DefaultGasProvider.GAS_PRICE;
+        BigInteger gasLimit = config.getGasLimit() > 0
+                ? BigInteger.valueOf(config.getGasLimit())
+                : DefaultGasProvider.GAS_LIMIT;
+        StaticGasProvider gasProvider = new StaticGasProvider(gasPrice, gasLimit);
 
         // Use polling configuration from BlockchainConfig
         // Use FastRawTransactionManager for better nonce management (prevents
@@ -104,6 +113,7 @@ public class Web3jBlockchainServiceImpl implements BlockchainService {
         log.info("Connected to network: {}", config.getNetworkId());
         log.info("Contract address: {}", contractAddress);
         log.info("Account address: {}", credentials.getAddress());
+        log.info("Gas price: {} wei, gas limit: {}", gasPrice, gasLimit);
     }
 
     /**

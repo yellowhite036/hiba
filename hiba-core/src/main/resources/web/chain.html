@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HiBA 區塊鏈紀錄</title>
+<style>
+  /* 和 /nodes 相同的設計 token；圖表兩個系列用驗證過的藍 / 橘（色盲可分辨、兩種主題都 >= 3:1） */
+  :root {
+    --bg: #F8FAFC; --surface: #FFFFFF; --surface-2: #F1F5F9; --text: #0F172A; --muted: #475569;
+    --border: #E2E8F0; --border-strong: #CBD5E1;
+    --primary: #2563EB; --primary-soft: #DBEAFE; --on-primary: #FFFFFF;
+    --ok: #15803D; --ok-soft: #DCFCE7; --bad: #B91C1C; --bad-soft: #FEE2E2;
+    --warn: #A16207; --warn-soft: #FEF9C3; --neutral-soft: #E2E8F0;
+    --s-device: #2a78d6; --s-file: #eb6834; --grid: #E2E8F0;
+    --radius: 10px; --radius-sm: 6px;
+    --font: system-ui, -apple-system, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", "PingFang TC", sans-serif;
+    --mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, monospace;
+    --shadow: 0 1px 2px rgb(15 23 42 / 6%), 0 1px 3px rgb(15 23 42 / 8%);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0B1120; --surface: #111827; --surface-2: #1A2232; --text: #E5E7EB; --muted: #9CA3AF;
+      --border: #1F2937; --border-strong: #334155;
+      --primary: #60A5FA; --primary-soft: #172554; --on-primary: #0B1120;
+      --ok: #4ADE80; --ok-soft: #052E16; --bad: #F87171; --bad-soft: #3B0D0D;
+      --warn: #FACC15; --warn-soft: #3A2E05; --neutral-soft: #1F2937;
+      --s-device: #3987e5; --s-file: #d95926; --grid: #1F2937;
+      --shadow: 0 1px 2px rgb(0 0 0 / 40%);
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 var(--font); }
+  main { max-width: 1280px; margin: 0 auto; padding: 24px 16px 40px; display: grid; gap: 20px; }
+  h1 { font-size: 22px; line-height: 1.3; margin: 0; }
+  h2 { font-size: 17px; margin: 0; }
+  .muted { color: var(--muted); }
+  .small { font-size: 14px; }
+  .mono { font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
+  :focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+  header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 12px; border-radius: var(--radius-sm);
+         border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; font-size: 15px;
+         text-decoration: none; cursor: pointer; }
+  .btn:hover { background: var(--surface-2); }
+
+  .banner { border-radius: var(--radius); padding: 12px 16px; }
+  .banner.err { background: var(--bad-soft); color: var(--bad); }
+  .banner.warn { background: var(--warn-soft); color: var(--warn); }
+
+  /* 摘要 */
+  .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  @media (max-width: 900px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 480px) { .tiles { grid-template-columns: minmax(0, 1fr); } }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); min-width: 0; display: grid; gap: 2px; align-content: start; }
+  .tile .n { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
+  .tile .l { color: var(--muted); font-size: 14px; }
+  .tile .sub { font-size: 14px; }
+  .tile.warn .n { color: var(--warn); }
+
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); min-width: 0; }
+  .panel-h { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .panel-b { padding: 14px 16px; }
+
+  /* 圖表 */
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; color: var(--muted); }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+  .chart-wrap { position: relative; overflow-x: auto; }
+  .chart-wrap svg { display: block; width: 100%; min-width: 520px; height: auto; }
+  .chart-wrap text { fill: var(--muted); font: 12px var(--font); }
+  .tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+         box-shadow: var(--shadow); padding: 8px 10px; font-size: 13px; white-space: nowrap; color: var(--text); }
+  details.table-view { margin-top: 10px; font-size: 14px; }
+  details.table-view table { border-collapse: collapse; margin-top: 8px; }
+  details.table-view th, details.table-view td { padding: 4px 14px 4px 0; text-align: left; font-variant-numeric: tabular-nums; }
+
+  /* 設備 */
+  .devices { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .device { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+  .device-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .device-h strong { overflow-wrap: anywhere; }
+  .life { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+  .life li { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+  .life .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .life .when { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  .badge { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .b-ok { color: var(--ok); background: var(--ok-soft); }
+  .b-bad { color: var(--bad); background: var(--bad-soft); }
+  .b-warn { color: var(--warn); background: var(--warn-soft); }
+  .b-plain { color: var(--muted); background: var(--neutral-soft); }
+
+  /* 動作時間軸 */
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); overflow: hidden; background: var(--surface); }
+  .seg button { min-height: 40px; padding: 0 14px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 15px; cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--border-strong); }
+  .seg button[aria-pressed="true"] { background: var(--primary); color: var(--on-primary); font-weight: 600; }
+  .toolbar input { flex: 1 1 200px; max-width: 320px; min-height: 40px; padding: 0 12px; border-radius: var(--radius-sm);
+                   border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; }
+  .day { display: grid; gap: 6px; }
+  .day + .day { margin-top: 16px; }
+  .day-h { font-size: 13px; font-weight: 700; color: var(--muted); letter-spacing: .04em; }
+  .act { border: 1px solid var(--border); border-radius: var(--radius-sm); }
+  .act summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 10px; align-items: baseline; padding: 10px 12px; }
+  .act summary::-webkit-details-marker { display: none; }
+  .act summary .dot { width: 10px; height: 10px; border-radius: 50%; align-self: center; }
+  .act .what { min-width: 0; overflow-wrap: anywhere; }
+  .act .who { display: block; font-size: 13px; color: var(--muted); margin-top: 2px; }
+  .act .time { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .act[open] summary { border-bottom: 1px solid var(--border); }
+  .act dl { margin: 0; padding: 10px 12px 12px 34px; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; font-size: 13px; }
+  .act dt { color: var(--muted); }
+  .act dd { margin: 0; min-width: 0; }
+  .more { margin-top: 12px; }
+  .empty { padding: 24px 0; text-align: center; color: var(--muted); }
+  footer { font-size: 14px; color: var(--muted); display: grid; gap: 4px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>HiBA 區塊鏈紀錄</h1>
+      <div class="muted small" id="updated">載入中…</div>
+    </div>
+    <a class="btn" href="/nodes">← 節點拓撲</a>
+  </header>
+
+  <div id="banner" class="banner" role="status" aria-live="polite" hidden></div>
+
+  <section class="tiles" aria-label="摘要">
+    <div class="tile"><div class="n" id="t-dev">–</div><div class="l">鏈上登記的設備</div><div class="sub" id="t-dev-sub"></div></div>
+    <div class="tile"><div class="n" id="t-file">–</div><div class="l">受保護的檔案</div><div class="sub muted" id="t-file-sub"></div></div>
+    <div class="tile"><div class="n" id="t-last">–</div><div class="l">最近一次動作</div><div class="sub" id="t-last-sub"></div></div>
+    <div class="tile" id="t-anvil-tile"><div class="n" id="t-anvil">–</div><div class="l">用公開測試帳號送出的動作</div><div class="sub muted" id="t-anvil-sub"></div></div>
+  </section>
+
+  <section class="panel" aria-labelledby="chart-title">
+    <div class="panel-h">
+      <h2 id="chart-title">動作次數</h2>
+      <div class="legend" aria-hidden="true">
+        <span><i style="background:var(--s-device)"></i>設備管理</span>
+        <span><i style="background:var(--s-file)"></i>檔案上鏈</span>
+      </div>
+    </div>
+    <div class="panel-b">
+      <div class="chart-wrap" id="chart"></div>
+      <details class="table-view"><summary>以表格檢視</summary><div id="chart-table"></div></details>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="dev-title">
+    <div class="panel-h"><h2 id="dev-title">設備</h2><span class="muted small">每台設備在鏈上的登記歷程</span></div>
+    <div class="panel-b"><div class="devices" id="devices"></div></div>
+  </section>
+
+  <section class="panel" aria-labelledby="act-title">
+    <div class="panel-h">
+      <h2 id="act-title">動作紀錄</h2>
+      <div class="toolbar">
+        <div class="seg" role="group" aria-label="依類型篩選">
+          <button type="button" data-f="all" aria-pressed="true">全部</button>
+          <button type="button" data-f="registry" aria-pressed="false">設備管理</button>
+          <button type="button" data-f="file" aria-pressed="false">檔案上鏈</button>
+        </div>
+        <input type="search" id="q" aria-label="搜尋動作" placeholder="節點、檔名、帳號…" autocomplete="off">
+      </div>
+    </div>
+    <div class="panel-b">
+      <div id="acts"><div class="empty">載入中…</div></div>
+      <button type="button" class="btn more" id="more" hidden>顯示更多</button>
+    </div>
+  </section>
+
+  <footer>
+    <div>連線：<span class="mono" id="f-rpc">–</span>・Chain ID <span id="f-chain">–</span>・最新區塊 <span id="f-block">–</span>・<span id="f-scan"></span></div>
+    <div>設備註冊合約 <span class="mono" id="f-reg">–</span>・檔案保護合約 <span class="mono" id="f-file">–</span></div>
+    <div>資料由 accounting server 定期讀取合約事件整理而成，只讀鏈、不需要私鑰。點一筆動作可看區塊與交易等細節。</div>
+  </footer>
+</main>
+
+<script>
+(() => {
+  "use strict";
+  const REFRESH_MS = 10000;
+  const PAGE = 40;
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const pad = (n) => String(n).padStart(2, "0");
+  const dateOf = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+  const timeOf = (ms) => { const d = new Date(ms); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  const short = (s, n = 8) => (s && s.length > n + 6 ? `${s.slice(0, n)}…${s.slice(-4)}` : s || "–");
+  const ago = (ms) => {
+    const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+    if (s < 60) return "剛剛";
+    if (s < 3600) return `${Math.floor(s / 60)} 分鐘前`;
+    if (s < 86400) return `${Math.floor(s / 3600)} 小時前`;
+    if (s < 86400 * 60) return `${Math.floor(s / 86400)} 天前`;
+    return `${Math.floor(s / 86400 / 30)} 個月前`;
+  };
+
+  // Anvil 內建測試帳號：私鑰公開在 Foundry 文件裡
+  const ANVIL = {
+    "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266": 0,
+    "0x70997970c51812dc3a010c7d01b50e0d17dc79c8": 1,
+    "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc": 2,
+  };
+  const anvilNo = (a) => (a ? ANVIL[String(a).toLowerCase()] : undefined);
+
+  // open：展開中的動作（交易編號），每 10 秒重畫時保持展開
+  const state = { chain: null, ekNames: {}, filter: "all", q: "", shown: PAGE, error: null, open: new Set() };
+
+  // ---------- 把同一筆交易的事件合併成一個「動作」 ----------
+  function buildActions(events) {
+    const byTx = new Map();
+    for (const e of events) {
+      const key = e.tx || `${e.block}-${e.logIndex}`;
+      if (!byTx.has(key)) byTx.set(key, { tx: e.tx, block: e.block, time: e.time, from: e.from, contract: e.contract, events: [] });
+      byTx.get(key).events.push(e);
+    }
+    const list = Array.from(byTx.values());
+    list.forEach((a) => a.events.sort((x, y) => (x.logIndex || 0) - (y.logIndex || 0)));
+    list.sort((x, y) => y.block - x.block || (y.time - x.time));
+    return list;
+  }
+
+  const devName = (ek) => state.ekNames[ek] || `未知設備（EK ${short(ek, 8)}）`;
+
+  function actor(a) {
+    const from = a.from || (a.events[0] && a.events[0].account);
+    if (!from) return "送出帳號不明";
+    const n = anvilNo(from);
+    return n !== undefined ? `由 Anvil 公開測試帳號 #${n} 送出` : `由帳號 ${short(from)} 送出`;
+  }
+
+  // 一句話描述這個動作；kind 決定顏色與篩選
+  function describe(a) {
+    const by = (name) => a.events.filter((e) => e.event === name);
+    const files = by("FileStored");
+    const parts = [];
+    if (files.length === 1) parts.push(`登記檔案 ${files[0].fileName || "（沒有檔名）"}`);
+    if (files.length > 1) {
+      const names = files.map((f) => f.fileName || "（沒有檔名）");
+      parts.push(`一次登記 ${files.length} 個檔案：${names.slice(0, 3).join("、")}${names.length > 3 ? ` 等` : ""}`);
+    }
+    if (!files.length && by("BatchFileStored").length) parts.push(`一次登記 ${by("BatchFileStored")[0].count} 個檔案`);
+    if (by("FileUpdated").length) parts.push(`更新 ${by("FileUpdated").length} 筆檔案紀錄`);
+    if (by("FileDeleted").length) parts.push(`刪除 ${by("FileDeleted").length} 筆檔案紀錄`);
+    if (by("FilesCleared").length) parts.push(`清空所有檔案紀錄（${by("FilesCleared")[0].count} 筆）`);
+    by("DeviceRegistered").forEach((e) => parts.push(`登記設備 ${devName(e.ek)}`));
+    by("DevicePublicKeyUpdated").forEach((e) => parts.push(`更新 ${devName(e.ek)} 的公鑰`));
+    by("DeviceRevoked").forEach((e) => parts.push(`撤銷設備 ${devName(e.ek)}`));
+    by("DeviceReactivated").forEach((e) => parts.push(`恢復設備 ${devName(e.ek)}`));
+    by("AdminAdded").forEach((e) => parts.push(`新增管理員 ${short(e.account)}`));
+    by("AdminRemoved").forEach((e) => parts.push(`移除管理員 ${short(e.account)}`));
+    if (!parts.length) parts.push("其他合約動作");
+
+    const danger = by("DeviceRevoked").length || by("FileDeleted").length || by("FilesCleared").length || by("AdminRemoved").length;
+    const kind = a.contract === "registry" ? "registry" : "file";
+    return { text: parts.join("；"), kind, danger: !!danger };
+  }
+
+  // ---------- 設備的登記歷程 ----------
+  const LIFE = {
+    DeviceRegistered: { label: "登記", color: "var(--ok)" },
+    DevicePublicKeyUpdated: { label: "更新公鑰", color: "var(--warn)" },
+    DeviceRevoked: { label: "撤銷", color: "var(--bad)" },
+    DeviceReactivated: { label: "恢復", color: "var(--s-device)" },
+  };
+  function buildDevices(events) {
+    const map = new Map();
+    events.filter((e) => e.ek && LIFE[e.event]).slice().sort((x, y) => x.block - y.block || (x.logIndex || 0) - (y.logIndex || 0))
+      .forEach((e) => {
+        if (!map.has(e.ek)) map.set(e.ek, { ek: e.ek, steps: [] });
+        map.get(e.ek).steps.push(e);
+      });
+    return Array.from(map.values()).map((d) => {
+      const last = d.steps[d.steps.length - 1].event;
+      d.active = last !== "DeviceRevoked";
+      d.online = Object.prototype.hasOwnProperty.call(state.ekNames, d.ek);
+      return d;
+    }).sort((x, y) => (x.active === y.active ? 0 : x.active ? -1 : 1) || devName(x.ek).localeCompare(devName(y.ek), undefined, { numeric: true }));
+  }
+
+  // ---------- 渲染 ----------
+  function renderBanner() {
+    const c = state.chain;
+    const b = $("banner");
+    if (state.error || (c && c.error)) {
+      b.hidden = false; b.className = "banner err";
+      b.textContent = state.error ? `無法取得紀錄（${state.error}），持續重試中。` : `讀取區塊鏈失敗：${c.error}`;
+    } else if (c && Number(c.chainId) === 31337) {
+      b.hidden = false; b.className = "banner warn";
+      b.textContent = "目前連的是 Anvil 本機測試鏈：只有一台機器出塊，鏈被重置時這些紀錄會一起消失。";
+    } else {
+      b.hidden = true;
+    }
+  }
+
+  function renderTiles(actions, devices, events) {
+    const active = devices.filter((d) => d.active).length;
+    $("t-dev").textContent = devices.length;
+    $("t-dev-sub").innerHTML = devices.length
+      ? `<span class="badge b-ok">啟用 ${active}</span> ${devices.length - active ? `<span class="badge b-bad">已撤銷 ${devices.length - active}</span>` : ""}`
+      : `<span class="muted">鏈上沒有設備登記事件</span>`;
+
+    const hashes = new Set(events.filter((e) => e.event === "FileStored" && e.fileHash).map((e) => e.fileHash));
+    $("t-file").textContent = hashes.size;
+    $("t-file-sub").textContent = hashes.size ? "鏈上登記過指紋的檔案" : "還沒有檔案上鏈";
+
+    const last = actions[0];
+    $("t-last").textContent = last ? ago(last.time) : "–";
+    $("t-last-sub").textContent = last ? describe(last).text : "鏈上還沒有任何動作";
+
+    const anvil = actions.filter((a) => anvilNo(a.from) !== undefined).length;
+    $("t-anvil").textContent = anvil;
+    $("t-anvil-tile").classList.toggle("warn", anvil > 0);
+    $("t-anvil-sub").innerHTML = anvil
+      ? `<span class="badge b-warn">⚠ 私鑰公開</span> 任何人都能用同一個帳號送出`
+      : "沒有";
+  }
+
+  // 依時間分組：跨距 60 天內按日，否則按月；只畫最近 24 組
+  function buckets(actions) {
+    if (!actions.length) return [];
+    const times = actions.map((a) => a.time).filter(Boolean);
+    const span = Math.max(...times) - Math.min(...times);
+    const byMonth = span > 60 * 86400000;
+    const keyOf = (ms) => (byMonth ? dateOf(ms).slice(0, 7) : dateOf(ms));
+    const map = new Map();
+    actions.forEach((a) => {
+      if (!a.time) return;
+      const k = keyOf(a.time);
+      if (!map.has(k)) map.set(k, { key: k, registry: 0, file: 0 });
+      map.get(k)[describe(a).kind] += 1;
+    });
+    // 補上沒有動作的時段，時間軸才不會把相隔很久的兩個月畫成相鄰
+    const keys = Array.from(map.keys()).sort();
+    const all = [];
+    const cur = new Date(keys[0] + (byMonth ? "-01" : "") + "T00:00:00");
+    const lastKey = keys[keys.length - 1];
+    for (let guard = 0; guard < 2000; guard++) {
+      const k = keyOf(cur.getTime());
+      all.push(map.get(k) || { key: k, registry: 0, file: 0 });
+      if (k >= lastKey) break;
+      if (byMonth) cur.setMonth(cur.getMonth() + 1); else cur.setDate(cur.getDate() + 1);
+    }
+    return all.slice(-24);
+  }
+
+  function niceMax(v) {
+    if (v <= 4) return 4;
+    const p = Math.pow(10, Math.floor(Math.log10(v)));
+    for (const m of [1, 2, 2.5, 5, 10]) if (m * p >= v) return m * p;
+    return 10 * p;
+  }
+
+  function renderChart(actions) {
+    const data = buckets(actions);
+    const box = $("chart");
+    if (!data.length) {
+      box.innerHTML = `<div class="empty">還沒有動作可以畫</div>`;
+      $("chart-table").innerHTML = "";
+      return;
+    }
+    const W = 720, H = 220, L = 36, R = 8, T = 10, B = 30;
+    const max = niceMax(Math.max(...data.map((d) => d.registry + d.file)));
+    const y = (v) => T + (H - T - B) * (1 - v / max);
+    const slot = (W - L - R) / data.length;
+    const bw = Math.max(6, Math.min(28, slot * 0.6));
+    const ticks = [0, max / 2, max];
+    const labelEvery = Math.ceil(data.length / 8);
+    let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="各時段的動作次數，依設備管理與檔案上鏈分開堆疊">`;
+    ticks.forEach((t) => {
+      svg += `<line x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}" stroke="var(--grid)" stroke-width="1"/>`;
+      svg += `<text x="${L - 6}" y="${y(t) + 4}" text-anchor="end">${t % 1 ? t.toFixed(1) : t}</text>`;
+    });
+    data.forEach((d, i) => {
+      const cx = L + slot * i + slot / 2, x = cx - bw / 2;
+      const yDev = y(d.registry), yTop = y(d.registry + d.file);
+      // 堆疊：設備管理在下、檔案上鏈在上，兩段之間留 2px 底色間隔
+      if (d.registry) svg += `<rect x="${x}" y="${yDev}" width="${bw}" height="${y(0) - yDev}" rx="2" fill="var(--s-device)"/>`;
+      if (d.file) {
+        const h = Math.max(0, yDev - yTop - (d.registry ? 2 : 0));
+        svg += `<rect x="${x}" y="${yTop}" width="${bw}" height="${h}" rx="2" fill="var(--s-file)"/>`;
+      }
+      svg += `<rect class="hit" data-i="${i}" x="${L + slot * i}" y="${T}" width="${slot}" height="${H - T - B}" fill="transparent"/>`;
+      if (i % labelEvery === 0 || i === data.length - 1) {
+        svg += `<text x="${cx}" y="${H - 10}" text-anchor="middle">${esc(d.key.length > 7 ? d.key.slice(5) : d.key)}</text>`;
+      }
+    });
+    svg += `</svg><div class="tip" id="tip" hidden></div>`;
+    box.innerHTML = svg;
+
+    const tip = $("tip");
+    box.querySelectorAll(".hit").forEach((r) => {
+      const show = () => {
+        const d = data[Number(r.dataset.i)];
+        tip.innerHTML = `<strong>${esc(d.key)}</strong><br>設備管理 ${d.registry} 次<br>檔案上鏈 ${d.file} 次`;
+        tip.hidden = false;
+        const br = r.getBoundingClientRect(), wr = box.getBoundingClientRect();
+        tip.style.left = `${Math.min(br.left - wr.left + box.scrollLeft, wr.width - 150)}px`;
+        tip.style.top = `0px`;
+      };
+      r.addEventListener("mouseenter", show);
+      r.addEventListener("mouseleave", () => { tip.hidden = true; });
+    });
+
+    $("chart-table").innerHTML = `<table><thead><tr><th>時段</th><th>設備管理</th><th>檔案上鏈</th></tr></thead><tbody>${
+      data.map((d) => `<tr><td>${esc(d.key)}</td><td>${d.registry}</td><td>${d.file}</td></tr>`).join("")}</tbody></table>`;
+  }
+
+  function renderDevices(devices) {
+    $("devices").innerHTML = devices.length ? devices.map((d) => `
+      <div class="device">
+        <div class="device-h">
+          <strong>${esc(devName(d.ek))}</strong>
+          ${d.active ? `<span class="badge b-ok">✓ 啟用</span>` : `<span class="badge b-bad">✕ 已撤銷</span>`}
+        </div>
+        <ol class="life">${d.steps.map((s) => `
+          <li><span class="dot" style="background:${LIFE[s.event].color}"></span><span>${LIFE[s.event].label}</span><span class="when">${esc(dateOf(s.time))}</span></li>`).join("")}
+        </ol>
+        <span class="mono muted" title="${esc(d.ek)}">EK ${esc(short(d.ek, 12))}</span>
+      </div>`).join("") : `<div class="empty">鏈上沒有設備登記事件</div>`;
+  }
+
+  function renderActions(actions) {
+    const q = state.q.toLowerCase();
+    const list = actions.filter((a) => {
+      const d = describe(a);
+      if (state.filter !== "all" && d.kind !== state.filter) return false;
+      if (!q) return true;
+      return [d.text, actor(a), a.from, a.tx, ...a.events.map((e) => [e.fileName, e.fileHash, e.ek, e.account].join(" "))]
+        .some((v) => v && String(v).toLowerCase().includes(q));
+    });
+    const shown = list.slice(0, state.shown);
+    let html = "", day = "";
+    shown.forEach((a) => {
+      const d = describe(a);
+      const k = dateOf(a.time);
+      if (k !== day) { html += `${day ? "</div>" : ""}<div class="day"><div class="day-h">${esc(k)}</div>`; day = k; }
+      const color = d.danger ? "var(--bad)" : d.kind === "registry" ? "var(--s-device)" : "var(--s-file)";
+      const anvil = anvilNo(a.from) !== undefined;
+      html += `<details class="act" data-tx="${esc(a.tx)}" ${state.open.has(a.tx) ? "open" : ""}>
+        <summary><span class="dot" style="background:${color}"></span>
+          <span class="what">${esc(d.text)}<span class="who">${esc(actor(a))}${anvil ? ` <span class="badge b-warn">⚠ 公開私鑰</span>` : ""}</span></span>
+          <span class="time">${esc(timeOf(a.time))}</span></summary>
+        <dl>
+          <dt>區塊</dt><dd>${esc(a.block)}</dd>
+          <dt>交易</dt><dd class="mono">${esc(a.tx)}</dd>
+          <dt>送出帳號</dt><dd class="mono">${esc(a.from || "–")}</dd>
+          ${a.events.filter((e) => e.fileHash).map((e) => `<dt>${esc(e.fileName || "檔案")}</dt><dd class="mono">SHA-256 ${esc(e.fileHash)}</dd>`).join("")}
+          ${a.events.filter((e) => e.ek).map((e) => `<dt>${esc(devName(e.ek))}</dt><dd class="mono">EK ${esc(e.ek)}</dd>`).join("")}
+          <dt>原始事件</dt><dd>${a.events.map((e) => esc(e.event)).join("、")}</dd>
+        </dl>
+      </details>`;
+    });
+    if (day) html += "</div>";
+    $("acts").innerHTML = html || `<div class="empty">${actions.length ? "沒有符合條件的動作" : "鏈上還沒有任何動作"}</div>`;
+    $("more").hidden = list.length <= state.shown;
+    $("more").textContent = `顯示更多（還有 ${Math.max(0, list.length - state.shown)} 筆）`;
+  }
+
+  function renderFooter() {
+    const c = state.chain;
+    if (!c) return;
+    $("f-rpc").textContent = c.rpcUrl || "–";
+    $("f-chain").textContent = c.chainId >= 0 ? c.chainId : "–";
+    $("f-block").textContent = c.latestBlock >= 0 ? c.latestBlock : "–";
+    $("f-scan").textContent = c.lastScanAt ? `最後讀取 ${dateOf(c.lastScanAt)} ${timeOf(c.lastScanAt)}` : "";
+    $("f-reg").textContent = (c.contracts && c.contracts.registry) || "沒有設定";
+    $("f-file").textContent = (c.contracts && c.contracts.file) || "沒有設定";
+  }
+
+  function render() {
+    renderBanner();
+    const c = state.chain;
+    if (!c) return;
+    const actions = buildActions(c.events || []);
+    const devices = buildDevices(c.events || []);
+    renderTiles(actions, devices, c.events || []);
+    renderChart(actions);
+    renderDevices(devices);
+    renderActions(actions);
+    renderFooter();
+  }
+
+  async function fetchJson(url) {
+    const r = await fetch(url, { cache: "no-store" });
+    if (!r.ok) {
+      let msg = "HTTP " + r.status;
+      try { const j = await r.json(); if (j && j.error) msg = j.error; } catch (e) { /* ignore */ }
+      throw new Error(msg);
+    }
+    return r.json();
+  }
+
+  async function refresh() {
+    try {
+      state.chain = await fetchJson("/api/chain");
+      state.error = null;
+      $("updated").textContent = `更新於 ${dateOf(Date.now())} ${timeOf(Date.now())}`;
+    } catch (e) {
+      state.error = e.message || String(e);
+    }
+    try {
+      const nodes = await fetchJson("/api/nodes"); // EK → 節點名稱
+      const map = {};
+      (nodes.nodes || []).forEach((n) => { if (n.ek) map[n.ek] = n.name; });
+      state.ekNames = map;
+    } catch (e) { /* 節點表拿不到也不影響紀錄 */ }
+    render();
+  }
+
+  document.querySelectorAll(".seg [data-f]").forEach((b) => b.addEventListener("click", () => {
+    state.filter = b.dataset.f;
+    state.shown = PAGE;
+    document.querySelectorAll(".seg [data-f]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    render();
+  }));
+  $("q").addEventListener("input", (e) => { state.q = e.target.value.trim(); state.shown = PAGE; render(); });
+  $("more").addEventListener("click", () => { state.shown += PAGE; render(); });
+  $("acts").addEventListener("toggle", (e) => {
+    const d = e.target.closest && e.target.closest("details.act");
+    if (!d || !d.dataset.tx) return;
+    if (d.open) state.open.add(d.dataset.tx); else state.open.delete(d.dataset.tx);
+  }, true);
+
+  refresh();
+  setInterval(refresh, REFRESH_MS);
+})();
+</script>
+</body>
+</html>
