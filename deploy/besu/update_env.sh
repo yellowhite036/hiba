@@ -90,9 +90,11 @@ print(f"""
        BlockchainTPMRegistry.contractAddress  {d['TPMDeviceRegistry']}
        BlockchainFileProtect.contractAddress  {d['FileProtectionContract']}
        兩個 privateKey                        檔案上鏈帳號（besu-deploy/uploader.key，不是 admin.key）
-  4. 每台設備重新登記（新鏈上沒有任何設備）：在 Pi 上逐台執行
-       sudo bash ~/hiba_dist/register_node.sh <EK> <公鑰>
-     EK 與公鑰在各節點的 ~/HiBA/tpm_registration.txt
+     （只換了檔案合約時，只要改 BlockchainFileProtect.contractAddress）
+  4. 每台設備登記並綁定它自己的錢包（檔案上鏈改用 ~/HiBA/device_wallet.key，不再用共用帳號）：
+       在節點上取得錢包位址：java -cp ~/HiBA/hiba-core-0.0.1.jar org.gslab.util.DeviceWallet ~/HiBA
+       在 Pi 上逐台執行：    sudo bash ~/hiba_dist/register_node.sh <EK> <公鑰> <錢包位址>
+     EK 與公鑰在各節點的 ~/HiBA/tpm_registration.txt；設備已登記過時只會補綁錢包
   5. 管理員私鑰 admin.key：確認 Pi 的 env.json 已寫入後，把 besu-deploy/admin.key 移到離線的地方保管
 """)
 EOF

@@ -5,6 +5,11 @@
 #   bash deploy_contracts.sh --rpc http://192.168.1.62:8545
 #   bash deploy_contracts.sh --rpc URL --contracts DIR   合約原始碼目錄（預設 hiba-core/contract）
 #   bash deploy_contracts.sh --rpc URL --admin-key FILE  使用既有的管理員私鑰檔（預設產生新的）
+#   bash deploy_contracts.sh --rpc URL --file-only       只重新部署 FileProtectionContract，沿用 besu-deploy/deploy.json
+#                                                        裡的 TPMDeviceRegistry（已登記的設備不用重來）
+#
+# FileProtectionContract 部署後會呼叫 setDeviceRegistry(TPMDeviceRegistry)：之後只有「錢包已由管理員
+# 綁定到設備 EK」的節點能登記檔案（register_node.sh 第三個參數），鏈上紀錄會寫出是哪台設備。
 #
 # 產生（都在目前目錄的 besu-deploy/，請移到安全的地方保管）：
 #   admin.key      管理員私鑰：只放在負責登記設備的機器（Pi）上，另外離線備份
@@ -16,6 +21,7 @@ RPC=""
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONTRACTS="$SCRIPT_DIR/../../hiba-core/contract"
 ADMIN_KEY_FILE=""
+FILE_ONLY=0
 OUT="$PWD/besu-deploy"
 
 ok()   { echo "  ✔ $*"; }
@@ -28,7 +34,8 @@ while [ $# -gt 0 ]; do
         --rpc) RPC="$2"; shift 2 ;;
         --contracts) CONTRACTS="$2"; shift 2 ;;
         --admin-key) ADMIN_KEY_FILE="$2"; shift 2 ;;
-        -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
+        --file-only) FILE_ONLY=1; shift ;;
+        -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
         *) fail "不認得的選項: $1" ;;
     esac
 done
@@ -114,14 +121,29 @@ deploy() { # $1 = 檔名:合約名
     fi
     echo "$addr"
 }
-REGISTRY="$(deploy TPMDeviceRegistry.sol:TPMDeviceRegistry)" || fail "部署 TPMDeviceRegistry 失敗（訊息如上）"
-ok "TPMDeviceRegistry       $REGISTRY"
+if [ "$FILE_ONLY" = 1 ]; then
+    [ -f "$OUT/deploy.json" ] || fail "--file-only 需要 $OUT/deploy.json（上一次完整部署的結果）"
+    REGISTRY="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["TPMDeviceRegistry"])' "$OUT/deploy.json")" \
+        || fail "讀不到 $OUT/deploy.json 的 TPMDeviceRegistry"
+    [ "$(cast code "$REGISTRY" --rpc-url "$RPC" 2>/dev/null)" != 0x ] || fail "鏈上 $REGISTRY 沒有合約（鏈被重置過？請改做完整部署）"
+    ok "沿用 TPMDeviceRegistry  $REGISTRY"
+else
+    REGISTRY="$(deploy TPMDeviceRegistry.sol:TPMDeviceRegistry)" || fail "部署 TPMDeviceRegistry 失敗（訊息如上）"
+    ok "TPMDeviceRegistry       $REGISTRY"
+fi
 FILE_CONTRACT="$(deploy FileMetadataContract.sol:FileProtectionContract)" || fail "部署 FileProtectionContract 失敗（訊息如上）"
 ok "FileProtectionContract  $FILE_CONTRACT"
 
 # 確認管理員權限（部署者就是 owner 兼 admin）
 IS_ADMIN="$(cast call "$REGISTRY" "admins(address)(bool)" "$ADMIN_ADDR" --rpc-url "$RPC" 2>/dev/null)"
 [ "$IS_ADMIN" = true ] && ok "管理員權限確認" || warn "admins($ADMIN_ADDR) 回傳 $IS_ADMIN，請確認合約的 owner/admin 設定"
+
+# 檔案合約改成只接受已綁定設備的錢包
+cast send "$FILE_CONTRACT" "setDeviceRegistry(address)" "$REGISTRY" --rpc-url "$RPC" --private-key "$ADMIN_KEY" \
+    --legacy --gas-price 0 >/dev/null || fail "setDeviceRegistry 交易失敗"
+SET_REG="$(cast call "$FILE_CONTRACT" "deviceRegistry()(address)" --rpc-url "$RPC" 2>/dev/null)"
+[ "${SET_REG,,}" = "${REGISTRY,,}" ] || fail "檔案合約的 deviceRegistry 是 $SET_REG，不是 $REGISTRY"
+ok "檔案合約只接受已綁定到設備 EK 的錢包"
 
 # ---------------------------------------------------------------------------
 python3 - "$OUT/deploy.json" "$RPC" "$CHAIN_ID" "$REGISTRY" "$FILE_CONTRACT" "$ADMIN_ADDR" "$UPLOADER_ADDR" <<'EOF'
@@ -134,6 +156,14 @@ EOF
 ok "$OUT/deploy.json"
 
 echo
+if [ "$FILE_ONLY" = 1 ]; then
+    echo "下一步（在 Pi 上）："
+    echo "  1. bash ~/build/hiba-dev/hiba/deploy/besu/update_env.sh --deploy $OUT   （更新 Pi 與節點範本的檔案合約位址）"
+    echo "     sudo systemctl restart hiba.service"
+    echo "  2. 各節點會由自動更新改成新的檔案合約位址（約 2～4 分鐘），不用手動改"
+    echo "  3. 等節點送出錢包聲明後，一次綁定：sudo bash /home/user/hiba_dist/bind_wallets.sh"
+    exit 0
+fi
 echo "下一步：把 $OUT 整個複製到 Pi，再在 Pi 上更新設定："
 echo "  scp -r $OUT user@<Pi的IP>:~/besu-deploy"
 echo "  bash ~/build/hiba-dev/hiba/deploy/besu/update_env.sh --deploy ~/besu-deploy"

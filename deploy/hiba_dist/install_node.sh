@@ -446,16 +446,33 @@ hit = any(n.get("ek") == ek and n.get("chain", {}).get("registered") for n in d.
 print("yes" if hit else "no")' "$(api_json)" "$EK"
 }
 
+# 這台自己的上鏈錢包（$DIR/device_wallet.key，第一次會產生）：註冊時一起綁定到 EK，之後檔案上鏈才會被接受
+WALLET=""
+for J in "$SCRIPT_DIR/hiba-core-0.0.1.jar" "$DIR/hiba-core-0.0.1.jar"; do
+    [ -f "$J" ] || continue
+    WALLET="$("$JDK_LINK/bin/java" -cp "$J" org.gslab.util.DeviceWallet "$DIR" 2>/dev/null | grep -oE '0x[0-9a-fA-F]{40}' | tail -1)"
+    [ -n "$WALLET" ] && break
+done
+if [ -n "$WALLET" ]; then
+    ok "設備錢包 $WALLET（私鑰在 $DIR/device_wallet.key，不要外流）"
+else
+    warn "無法取得設備錢包（找不到新版 hiba-core-0.0.1.jar？）：這次只註冊 TPM，檔案上鏈要等之後補綁錢包"
+fi
+WALLET_BOUND=0
+[ -n "$WALLET" ] && [ "$(cat "$DIR/device_wallet.bound" 2>/dev/null)" = "$WALLET" ] && WALLET_BOUND=1
+
 REG="$(ek_registered)"
-REG_CMD="sudo bash $REMOTE_DIST/register_node.sh $EK $PUB"
-if [ "$REG" = yes ] && [ "$KEY_CREATED" = 0 ]; then
+REG_CMD="sudo bash $REMOTE_DIST/register_node.sh $EK $PUB $WALLET"
+if [ "$REG" = yes ] && [ "$KEY_CREATED" = 0 ] && { [ -z "$WALLET" ] || [ "$WALLET_BOUND" = 1 ]; }; then
     ok "這台的 EK 已經註冊在鏈上"
 else
-    [ "$REG" = yes ] && echo "  EK 已註冊，但簽章金鑰是剛建立的，要更新鏈上的公鑰"
+    [ "$REG" = yes ] && [ "$KEY_CREATED" = 1 ] && echo "  EK 已註冊，但簽章金鑰是剛建立的，要更新鏈上的公鑰"
+    [ "$REG" = yes ] && [ "$KEY_CREATED" = 0 ] && echo "  EK 已註冊，還要把設備錢包綁定到這台"
     if [ "$DO_REGISTER" = 1 ]; then
         echo "  ssh 到 Pi 註冊：請輸入 Pi 的 sudo 密碼（若前面的 ssh 連線已斷，會先問 Pi 上 $PI_USER 的登入密碼）"
         if pi_ssh_t "$REG_CMD"; then
             ok "Pi 上的註冊完成"
+            [ -n "$WALLET" ] && printf '%s\n' "$WALLET" > "$DIR/device_wallet.bound"
         else
             warn "ssh 註冊失敗。請在 Pi 上手動執行（整行複製）："
             echo; echo "    $REG_CMD"; echo
