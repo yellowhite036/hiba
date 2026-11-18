@@ -199,6 +199,12 @@ public final class WalletAttestation {
         return null;
     }
 
+    /** 這台設備最近一次回報（已驗章）的錢包位址（小寫）；沒有回報過為 null */
+    public static String reportedWallet(String ek) {
+        JSONObject o = ek == null ? null : BY_EK.get(ek);
+        return o == null ? null : o.optString("wallet", null);
+    }
+
     /** GET /api/wallets */
     public static JSONObject toJson() {
         List<JSONObject> list = new ArrayList<>(BY_EK.values());

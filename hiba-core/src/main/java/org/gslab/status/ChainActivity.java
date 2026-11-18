@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -19,12 +20,14 @@ import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.web3j.abi.EventEncoder;
+import org.web3j.abi.FunctionEncoder;
 import org.web3j.abi.FunctionReturnDecoder;
 import org.web3j.abi.TypeReference;
 import org.web3j.abi.datatypes.Address;
 import org.web3j.abi.datatypes.Bool;
 import org.web3j.abi.datatypes.DynamicArray;
 import org.web3j.abi.datatypes.Event;
+import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.Type;
 import org.web3j.abi.datatypes.Utf8String;
 import org.web3j.abi.datatypes.generated.Uint256;
@@ -33,6 +36,7 @@ import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.BatchRequest;
 import org.web3j.protocol.core.BatchResponse;
 import org.web3j.protocol.core.DefaultBlockParameter;
+import org.web3j.protocol.core.DefaultBlockParameterName;
 import org.web3j.protocol.core.Response;
 import org.web3j.protocol.core.methods.request.EthFilter;
 import org.web3j.protocol.core.methods.request.Transaction;
@@ -537,6 +541,43 @@ public final class ChainActivity {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private static final String ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+    /**
+     * 檔案合約上各設備綁定的錢包（節點狀態頁用）。
+     *
+     * @return EK → 錢包位址（小寫；沒有綁定為空字串）；檔案合約是舊版（沒有 getWalletOfDevice）時回傳 null
+     * @throws Exception 連不到鏈等錯誤（呼叫端保留上一次的結果）
+     */
+    public Map<String, String> deviceWallets(Collection<String> eks) throws Exception {
+        if (web3j == null || fileAddress.isBlank()) {
+            return null;
+        }
+        List<String> list = new ArrayList<>(eks);
+        Map<String, String> out = new HashMap<>();
+        if (list.isEmpty()) {
+            return out;
+        }
+        BatchRequest batch = web3j.newBatch();
+        for (String ek : list) {
+            String data = FunctionEncoder.encode(new Function(
+                    "getWalletOfDevice", List.<Type>of(new Utf8String(ek)), List.<TypeReference<?>>of(new TypeReference<Address>() {})));
+            batch.add(web3j.ethCall(
+                    Transaction.createEthCallTransaction(null, fileAddress, data), DefaultBlockParameterName.LATEST));
+        }
+        List<? extends Response<?>> responses = batch.send().getResponses();
+        for (int i = 0; i < list.size() && i < responses.size(); i++) {
+            Response<?> r = responses.get(i);
+            if (r.hasError() || !(r instanceof EthCall call) || call.isReverted()
+                    || call.getValue() == null || call.getValue().length() < 66) {
+                return null; // 舊版檔案合約：沒有這個函式
+            }
+            String addr = ("0x" + call.getValue().substring(call.getValue().length() - 40)).toLowerCase();
+            out.put(list.get(i), ZERO_ADDRESS.equals(addr) ? "" : addr);
+        }
+        return out;
     }
 
     /** GET /api/chain 的內容 */

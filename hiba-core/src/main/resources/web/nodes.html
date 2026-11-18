@@ -198,6 +198,10 @@
   .pn-name { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
   .pn .mono { font-size: 12px; color: var(--muted); }
   .pn .gtag { margin-left: auto; }
+  .pn .wmark { display: inline-flex; align-items: center; justify-content: center; flex: none;
+               width: 22px; height: 22px; border-radius: 999px; margin-left: auto; }
+  .pn .wmark .i { width: 13px; height: 13px; }
+  .pn .wmark + .gtag { margin-left: 0; }
   .pn.acct { cursor: default; }
   .pn.acct:hover { background: transparent; border-color: transparent; }
   .pn.acct .dot { background: var(--text); border-radius: 2px; }
@@ -408,6 +412,38 @@
     return c.active ? `<span class="badge b-ok">${icon("shield")}已註冊</span>`
                     : `<span class="badge b-warn">${icon("alert")}已撤銷</span>`;
   };
+  // 設備錢包（檔案上鏈用，見 /api/wallets、bind_wallets.sh）：只有已註冊、未撤銷的設備才有
+  const WALLET = {
+    bound: ["b-ok", "key", "錢包已綁定", "設備錢包已綁定，可以把檔案登記上鏈"],
+    pending: ["b-warn", "key", "錢包待綁定", "節點已回報錢包，還沒綁定：在 Pi 執行 bind_wallets.sh"],
+    mismatch: ["b-bad", "alert", "錢包不符", "鏈上綁定的錢包和節點目前使用的不同，上鏈會被拒絕：在 Pi 執行 bind_wallets.sh 改綁"],
+    unbound: ["b-plain", "key", "錢包未綁定", "還沒有綁定錢包，節點也還沒回報（新版 jar 啟動 30 秒後回報）"],
+    unsupported: ["b-plain", "help", "合約無錢包功能", "目前的檔案合約是舊版，沒有設備錢包功能"],
+    unknown: ["b-plain", "help", "錢包狀態未知", "還沒讀到鏈上的錢包綁定"],
+  };
+  const walletOf = (c) => (c && c.registered && c.active && c.wallet ? (WALLET[c.wallet.status] || WALLET.unknown) : null);
+  const walletBadge = (c) => {
+    const w = walletOf(c);
+    return w ? `<span class="badge ${w[0]}" title="${esc(w[3])}">${icon(w[1])}${w[2]}</span>` : "";
+  };
+  // 卡片上的上鏈狀態：沒註冊／已撤銷顯示註冊狀態，已註冊的顯示錢包狀態；沒有 EK 的不顯示
+  const cardChainBadge = (c) => {
+    if (!c || c.registered == null) return "";
+    if (!c.registered || !c.active) return chainBadge(c);
+    return walletBadge(c);
+  };
+  // 實體網路檢視每列的小圖示：[樣式, 圖示, 簡短文字, 說明]
+  const chainMarkOf = (c) => {
+    if (!c || c.registered == null) return null;
+    if (!c.registered) return ["b-bad", "shield-off", "TPM 未註冊", "這台的 TPM 沒有在鏈上註冊"];
+    if (!c.active) return ["b-warn", "alert", "TPM 已撤銷", "這台的 TPM 在鏈上已被撤銷"];
+    return walletOf(c);
+  };
+  const walletMark = (c) => {
+    const w = chainMarkOf(c);
+    return w ? `<span class="wmark ${w[0]}" title="${esc(w[2] + "：" + w[3])}" aria-hidden="true">${icon(w[1])}</span>` : "";
+  };
+
   // 自動更新程式回報的 jar 版本：null＝沒裝自動更新（或還沒檢查過）
   const shortMd5 = (m) => (m ? m.slice(0, 8) : "–");
   const isOutdated = (n) => !!(n.version && !n.version.current);
@@ -576,7 +612,7 @@
             <div class="node-h"><span class="kind ${broker ? "broker" : ""}">${icon(broker ? "network" : "cpu")}</span>
               <span class="name">${highlight(n.name)}</span></div>
             <div class="node-ip"><span class="mono">${highlight(n.ip || "–")}</span>${member != null ? groupTag(member, false) : ""}${own != null ? groupTag(own, true) : ""}</div>
-            <div class="node-f">${statusBadge(n)}${isOutdated(n) ? `<span class="badge b-warn" title="jar 與 accounting server 提供的版本不同">${icon("alert")}舊版</span>` : ""}<span>${broker ? `${sub.online}/${sub.total} 在線` : (online ? "" : ago(n.lastSeen, now))}</span></div>
+            <div class="node-f">${statusBadge(n)}${cardChainBadge(n.chain)}${isOutdated(n) ? `<span class="badge b-warn" title="jar 與 accounting server 提供的版本不同">${icon("alert")}舊版</span>` : ""}<span>${broker ? `${sub.online}/${sub.total} 在線` : (online ? "" : ago(n.lastSeen, now))}</span></div>
           </div>`;
       }
 
@@ -674,11 +710,11 @@
       const ip = n.ip || "–";
       return `<div role="listitem"><button type="button" class="pn ${n.status === "online" ? "" : "off"}" data-node="${esc(n.name)}"
           aria-current="${state.selected === n.name}" tabindex="-1"
-          aria-label="${esc(`${n.name}，${n.role === "broker" ? "Broker" : "節點"}，${n.status === "online" ? "在線" : "離線"}，${ip}`)}">
+          aria-label="${esc(`${n.name}，${n.role === "broker" ? "Broker" : "節點"}，${n.status === "online" ? "在線" : "離線"}，${ip}${chainMarkOf(n.chain) ? "，" + chainMarkOf(n.chain)[2] : ""}`)}">
           <span class="dot" aria-hidden="true"></span>
           <span class="kind ${n.role === "broker" ? "broker" : ""}" style="width:22px;height:22px">${icon(n.role === "broker" ? "network" : "cpu")}</span>
           <span class="pn-text"><span class="pn-name">${highlight(n.name)}</span><span class="mono">${highlight(ip)}</span></span>
-          ${mem != null ? groupTag(mem, false) : ""}${own != null ? groupTag(own, true) : ""}</button></div>`;
+          ${walletMark(n.chain)}${mem != null ? groupTag(mem, false) : ""}${own != null ? groupTag(own, true) : ""}</button></div>`;
     };
 
     const item = (k, level, parentKey) => {
@@ -811,6 +847,9 @@
         <dt>資源</dt><dd>${res.length ? `<span class="chips">${res.map((k) =>
             `<span class="chip">${esc(resLabel(k))} ${esc(resValue(k, n.resources[k]))}</span>`).join("")}</span>` : "–"}</dd>
         <dt>鏈上註冊</dt><dd>${chainBadge(c)}${c.registeredAt ? `<div class="muted small">${esc(fmtTime(c.registeredAt * 1000))} 註冊</div>` : ""}</dd>
+        <dt>上鏈錢包</dt><dd>${walletBadge(c) || "–"}${c.wallet ? `<div class="muted small">${walletOf(c) ? esc(walletOf(c)[3]) : ""}</div>
+          ${c.wallet.bound ? `<div class="small">鏈上綁定 <span class="mono">${esc(c.wallet.bound)}</span></div>` : ""}
+          ${c.wallet.reported && c.wallet.reported !== c.wallet.bound ? `<div class="small">節點回報 <span class="mono">${esc(c.wallet.reported)}</span></div>` : ""}` : ""}</dd>
         <dt>版本</dt><dd>${versionBadge(n.version)}${n.version ? `<div class="muted small"><span class="mono">${esc(shortMd5(n.version.md5))}</span>，${n.version.running ? "HiBA 執行中" : "HiBA 未執行"}，${ago(n.version.checkedAt, now)}檢查</div>` : ""}</dd>
         <dt>EK</dt><dd class="mono">${esc(n.ek || "未回報（未啟用 TPM 簽章）")}</dd>
       </dl>

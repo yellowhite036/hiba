@@ -70,6 +70,10 @@ public final class NodeStatusRegistry {
     private volatile Map<String, TPMDeviceRegistry.DeviceInfo> chainDevices = Map.of(); // EK → 鏈上註冊資訊
     private volatile boolean chainOk = false;
     private volatile String chainError = "尚未讀取";
+    /** EK → 檔案合約上綁定的錢包（空字串＝沒有綁定）；null＝還沒讀到或讀取失敗 */
+    private volatile Map<String, String> chainWallets = null;
+    /** 檔案合約是否支援設備錢包（null＝還不知道） */
+    private volatile Boolean walletsSupported = null;
     private volatile long chainFetchedAt = 0;
 
     private NodeStatusRegistry() {}
@@ -274,12 +278,49 @@ public final class NodeStatusRegistry {
             chainOk = true;
             chainError = null;
             chainFetchedAt = System.currentTimeMillis();
+            refreshWallets();
         } catch (Exception e) {
             // 保留上一次讀到的清單，但標記為不可用，讓頁面與安裝腳本知道資料可能過期
             chainOk = false;
             chainError = String.valueOf(e.getMessage());
             logger.atWarn().log("Failed to read registered devices from chain: {}", e.getMessage());
         }
+    }
+
+    /** 讀各設備在檔案合約上綁定的錢包；失敗時保留上一次的結果 */
+    private void refreshWallets() {
+        try {
+            Map<String, String> wallets = ChainActivity.get().deviceWallets(chainDevices.keySet());
+            walletsSupported = wallets != null;
+            chainWallets = wallets == null ? null : Map.copyOf(wallets);
+        } catch (Exception e) {
+            logger.atDebug().log("Failed to read device wallets from chain: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 設備錢包狀態：bound 已綁定、pending 節點已回報但還沒綁定、mismatch 綁定的錢包和節點目前用的不同、
+     * unbound 沒有綁定也還沒回報、unsupported 檔案合約是舊版、unknown 還沒讀到。
+     */
+    private JSONObject walletJson(String ek) {
+        Boolean supported = walletsSupported;
+        Map<String, String> wallets = chainWallets;
+        String reported = WalletAttestation.reportedWallet(ek);
+        String bound = wallets == null ? null : wallets.get(ek);
+        String status;
+        if (Boolean.FALSE.equals(supported)) {
+            status = "unsupported";
+        } else if (bound == null) {
+            status = "unknown";
+        } else if (!bound.isEmpty()) {
+            status = reported != null && !reported.equalsIgnoreCase(bound) ? "mismatch" : "bound";
+        } else {
+            status = reported != null ? "pending" : "unbound";
+        }
+        return new JSONObject()
+                .put("status", status)
+                .put("bound", bound == null || bound.isEmpty() ? JSONObject.NULL : bound)
+                .put("reported", nullToJson(reported));
     }
 
     // ============ 輸出 /api/nodes ============
@@ -324,6 +365,7 @@ public final class NodeStatusRegistry {
                     chainInfo.put("active", info != null && info.active());
                     if (info != null) {
                         chainInfo.put("registeredAt", info.registeredAt().longValue());
+                        chainInfo.put("wallet", walletJson(r.ek));
                     }
                 }
             }
