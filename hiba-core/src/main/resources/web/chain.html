@@ -215,7 +215,7 @@
   const anvilNo = (a) => (a ? ANVIL[String(a).toLowerCase()] : undefined);
 
   // open：展開中的動作（交易編號），每 10 秒重畫時保持展開
-  const state = { chain: null, ekNames: {}, filter: "all", q: "", shown: PAGE, error: null, open: new Set() };
+  const state = { chain: null, ekNames: {}, walletEk: {}, filter: "all", q: "", shown: PAGE, error: null, open: new Set() };
 
   // ---------- 把同一筆交易的事件合併成一個「動作」 ----------
   function buildActions(events) {
@@ -233,9 +233,25 @@
 
   const devName = (ek) => state.ekNames[ek] || `未知設備（EK ${short(ek, 8)}）`;
 
+  // 錢包 → 設備 EK（新版合約的 DeviceWalletBound 事件；之後解除綁定的就移除）
+  function walletMap(events) {
+    const m = {};
+    events.slice().sort((x, y) => x.block - y.block || (x.logIndex || 0) - (y.logIndex || 0)).forEach((e) => {
+      if (!e.account) return;
+      const w = String(e.account).toLowerCase();
+      if (e.event === "DeviceWalletBound") m[w] = e.ek;
+      if (e.event === "DeviceWalletUnbound" && m[w] === e.ek) delete m[w];
+    });
+    return m;
+  }
+
   function actor(a) {
+    const dev = a.events.find((e) => e.event === "FileStoredByDevice" && e.ek);
+    if (dev) return `由設備 ${devName(dev.ek)} 送出（錢包 ${short(dev.account || a.from)}）`;
     const from = a.from || (a.events[0] && a.events[0].account);
     if (!from) return "送出帳號不明";
+    const ek = state.walletEk[String(from).toLowerCase()];
+    if (ek) return `由設備 ${devName(ek)} 的錢包 ${short(from)} 送出`;
     const n = anvilNo(from);
     return n !== undefined ? `由 Anvil 公開測試帳號 #${n} 送出` : `由帳號 ${short(from)} 送出`;
   }
@@ -260,10 +276,14 @@
     by("DeviceReactivated").forEach((e) => parts.push(`恢復設備 ${devName(e.ek)}`));
     by("AdminAdded").forEach((e) => parts.push(`新增管理員 ${short(e.account)}`));
     by("AdminRemoved").forEach((e) => parts.push(`移除管理員 ${short(e.account)}`));
+    by("DeviceWalletBound").forEach((e) => parts.push(`把錢包 ${short(e.account)} 綁定到設備 ${devName(e.ek)}（之後它能上鏈）`));
+    by("DeviceWalletUnbound").forEach((e) => parts.push(`解除設備 ${devName(e.ek)} 的錢包 ${short(e.account)}`));
+    if (by("DeviceRegistrySet").length) parts.push("啟用設備檢查：只有已綁定錢包、且未撤銷的設備能登記檔案");
     if (!parts.length) parts.push("其他合約動作");
 
-    const danger = by("DeviceRevoked").length || by("FileDeleted").length || by("FilesCleared").length || by("AdminRemoved").length;
-    const kind = a.contract === "registry" ? "registry" : "file";
+    const danger = by("DeviceWalletUnbound").length || by("DeviceRevoked").length || by("FileDeleted").length || by("FilesCleared").length || by("AdminRemoved").length;
+    const deviceAdmin = by("DeviceWalletBound").length || by("DeviceWalletUnbound").length || by("DeviceRegistrySet").length;
+    const kind = a.contract === "registry" || deviceAdmin ? "registry" : "file";
     return { text: parts.join("；"), kind, danger: !!danger };
   }
 
@@ -483,6 +503,7 @@
     renderBanner();
     const c = state.chain;
     if (!c) return;
+    state.walletEk = walletMap(c.events || []);
     const actions = buildActions(c.events || []);
     const devices = buildDevices(c.events || []);
     renderTiles(actions, devices, c.events || []);

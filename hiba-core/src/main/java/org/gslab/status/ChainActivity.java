@@ -22,6 +22,7 @@ import org.web3j.abi.EventEncoder;
 import org.web3j.abi.FunctionReturnDecoder;
 import org.web3j.abi.TypeReference;
 import org.web3j.abi.datatypes.Address;
+import org.web3j.abi.datatypes.Bool;
 import org.web3j.abi.datatypes.Event;
 import org.web3j.abi.datatypes.Type;
 import org.web3j.abi.datatypes.Utf8String;
@@ -74,6 +75,13 @@ public final class ChainActivity {
         add("FilesCleared", "file", new Event("FilesCleared", Arrays.asList(indexedAddress, uint, uint)));
         add("BatchFileDeleted", "file", new Event("BatchFileDeleted", Arrays.asList(indexedAddress, uint, uint)));
         add("BatchFileStored", "file", new Event("BatchFileStored", Arrays.asList(indexedAddress, uint, uint)));
+        // 設備錢包（FileProtectionContract 新版）：每筆檔案紀錄是哪台設備（EK）送出的
+        TypeReference<Bool> bool = new TypeReference<>() {};
+        add("FileStoredByDevice", "file", new Event("FileStoredByDevice", Arrays.asList(string, string, indexedAddress, bool, uint)));
+        add("DeviceRegistrySet", "file", new Event("DeviceRegistrySet", Arrays.asList(indexedAddress, uint)));
+        for (String name : List.of("DeviceWalletBound", "DeviceWalletUnbound")) {
+            add(name, "file", new Event(name, Arrays.asList(indexedString, string, indexedAddress, uint)));
+        }
     }
 
     private static void add(String name, String contract, Event event) {
@@ -237,6 +245,13 @@ public final class ChainActivity {
                         .put("account", topicAddress(topics, 2));
                 case "FilesCleared", "BatchFileDeleted", "BatchFileStored" -> e.put("count", value(data, 0))
                         .put("account", topicAddress(topics, 1));
+                case "FileStoredByDevice" -> e.put("fileHash", value(data, 0))
+                        .put("ek", value(data, 1))
+                        .put("isUpdate", data != null && data.size() > 2 && Boolean.TRUE.equals(data.get(2).getValue()))
+                        .put("account", topicAddress(topics, 1));
+                case "DeviceRegistrySet" -> e.put("account", topicAddress(topics, 1));
+                case "DeviceWalletBound", "DeviceWalletUnbound" -> e.put("ek", value(data, 0))
+                        .put("account", topicAddress(topics, 2));
                 default -> {}
             }
         }
