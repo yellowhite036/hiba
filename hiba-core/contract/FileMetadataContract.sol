@@ -1,13 +1,32 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
+/// TPMDeviceRegistry 中本合約用到的部分（合約本身不變，沿用已部署的那一份）
+interface ITPMDeviceRegistry {
+    function owner() external view returns (address);
+    function admins(address account) external view returns (bool);
+    function isDeviceActive(string calldata ekFingerprint) external view returns (bool);
+}
+
 /**
  * FileProtectionContract Smart Contract
  * Stores file metadata on the blockchain for integrity verification
+ *
+ * 誰可以上鏈：每台設備有自己的錢包，由 TPMDeviceRegistry 的管理員用 bindDeviceWallet 綁定到
+ * 該設備的 EK 指紋。storeFile / batchStoreFile 只接受「已綁定、且設備在 TPMDeviceRegistry 中為啟用」
+ * 的錢包，並在 FileStoredByDevice 事件寫出 EK 指紋，所以鏈上看得出是哪台設備的動作，且無法冒充。
+ * 設備被撤銷（revokeDevice）後，它的錢包立即無法再上鏈。
+ * 尚未設定 deviceRegistry 前，只有合約擁有者能上鏈（部署當下的過渡狀態）。
  */
 contract FileProtectionContract {
 
     address private owner;
+
+    /// 設備登記合約；設定後只有已綁定的設備錢包能上鏈
+    ITPMDeviceRegistry public deviceRegistry;
+
+    mapping(address => string) private walletDevice;   // 錢包 => EK 指紋
+    mapping(string => address) private deviceWallet;   // EK 指紋 => 錢包
 
     // Input struct for batch operations (user provides these fields)
     struct FileMetadata {
@@ -73,6 +92,31 @@ contract FileProtectionContract {
         uint256 timestamp
     );
 
+    /// 每一筆檔案登記（新增或更新）是哪台設備送出的
+    event FileStoredByDevice(
+        string fileHash,
+        string ekFingerprint,
+        address indexed uploader,
+        bool isUpdate,
+        uint256 timestamp
+    );
+
+    event DeviceRegistrySet(address indexed registry, uint256 timestamp);
+
+    event DeviceWalletBound(
+        string indexed ekFingerprintHash,
+        string ekFingerprint,
+        address indexed wallet,
+        uint256 timestamp
+    );
+
+    event DeviceWalletUnbound(
+        string indexed ekFingerprintHash,
+        string ekFingerprint,
+        address indexed wallet,
+        uint256 timestamp
+    );
+
     constructor() {
         owner = msg.sender;
     }
@@ -80,6 +124,106 @@ contract FileProtectionContract {
     modifier onlyOwner() {
         require(msg.sender == owner, "Only contract owner can perform this action");
         _;
+    }
+
+    /// 合約擁有者，或 TPMDeviceRegistry 的擁有者／管理員（登記設備的同一把管理員私鑰）
+    modifier onlyRegistryAdmin() {
+        require(
+            msg.sender == owner ||
+            (address(deviceRegistry) != address(0) &&
+                (deviceRegistry.admins(msg.sender) || deviceRegistry.owner() == msg.sender)),
+            "Only device registry admin can perform this action"
+        );
+        _;
+    }
+
+    /// 上鏈權限檢查：錢包要綁定到一台在 TPMDeviceRegistry 中啟用的設備
+    modifier onlyActiveDevice() {
+        _checkActiveDevice();
+        _;
+    }
+
+    function _checkActiveDevice() private view {
+        if (address(deviceRegistry) == address(0)) {
+            require(msg.sender == owner, "Device registry not set: only owner can store files");
+            return;
+        }
+        string memory ek = walletDevice[msg.sender];
+        require(bytes(ek).length > 0, "Wallet is not bound to a registered device");
+        require(deviceRegistry.isDeviceActive(ek), "Device is revoked or not registered");
+    }
+
+    function _emitDevice(string memory fileHash, bool isUpdate) private {
+        emit FileStoredByDevice(fileHash, walletDevice[msg.sender], msg.sender, isUpdate, block.timestamp);
+    }
+
+    // ============ 設備錢包 ============
+
+    /**
+     * 設定設備登記合約（TPMDeviceRegistry 位址）。設定後只有已綁定的設備錢包能上鏈。
+     */
+    function setDeviceRegistry(address registry) public onlyOwner {
+        require(registry != address(0), "Registry cannot be zero address");
+        require(registry.code.length > 0, "Registry is not a contract");
+        deviceRegistry = ITPMDeviceRegistry(registry);
+        emit DeviceRegistrySet(registry, block.timestamp);
+    }
+
+    /**
+     * 把設備（EK 指紋）綁定到它的錢包；設備原本綁定的舊錢包會解除。
+     * 設備要已在 TPMDeviceRegistry 註冊且啟用；一個錢包只能屬於一台設備。
+     */
+    function bindDeviceWallet(string memory ekFingerprint, address wallet) public onlyRegistryAdmin {
+        require(address(deviceRegistry) != address(0), "Device registry not set");
+        require(wallet != address(0), "Wallet cannot be zero address");
+        require(deviceRegistry.isDeviceActive(ekFingerprint), "Device is revoked or not registered");
+        bytes memory current = bytes(walletDevice[wallet]);
+        require(
+            current.length == 0 || keccak256(current) == keccak256(bytes(ekFingerprint)),
+            "Wallet is already bound to another device"
+        );
+
+        address old = deviceWallet[ekFingerprint];
+        if (old == wallet) {
+            return;
+        }
+        if (old != address(0)) {
+            delete walletDevice[old];
+            emit DeviceWalletUnbound(ekFingerprint, ekFingerprint, old, block.timestamp);
+        }
+        deviceWallet[ekFingerprint] = wallet;
+        walletDevice[wallet] = ekFingerprint;
+        emit DeviceWalletBound(ekFingerprint, ekFingerprint, wallet, block.timestamp);
+    }
+
+    /**
+     * 解除設備的錢包綁定（例如錢包私鑰外洩、要換新錢包時）。
+     */
+    function unbindDeviceWallet(string memory ekFingerprint) public onlyRegistryAdmin {
+        address old = deviceWallet[ekFingerprint];
+        require(old != address(0), "Device has no bound wallet");
+        delete walletDevice[old];
+        delete deviceWallet[ekFingerprint];
+        emit DeviceWalletUnbound(ekFingerprint, ekFingerprint, old, block.timestamp);
+    }
+
+    /// 錢包屬於哪台設備（EK 指紋；沒有綁定則為空字串）
+    function getDeviceOfWallet(address wallet) public view returns (string memory) {
+        return walletDevice[wallet];
+    }
+
+    /// 設備綁定的錢包（沒有綁定則為 0 位址）
+    function getWalletOfDevice(string memory ekFingerprint) public view returns (address) {
+        return deviceWallet[ekFingerprint];
+    }
+
+    /// 這個錢包現在能不能上鏈
+    function canStoreFiles(address wallet) public view returns (bool) {
+        if (address(deviceRegistry) == address(0)) {
+            return wallet == owner;
+        }
+        string memory ek = walletDevice[wallet];
+        return bytes(ek).length > 0 && deviceRegistry.isDeviceActive(ek);
     }
 
     /**
@@ -93,7 +237,7 @@ contract FileProtectionContract {
         uint256 fileSize,
         string memory filePath,
         string memory description
-    ) public {
+    ) public onlyActiveDevice {
         require(bytes(fileName).length > 0, "File name cannot be empty");
         require(bytes(fileHash).length > 0, "File hash cannot be empty");
         require(bytes(uploader).length > 0, "Uploader cannot be empty");
@@ -115,15 +259,17 @@ contract FileProtectionContract {
         if (!isUpdate) {
             fileHashes.push(fileHash);
             emit FileStored(fileHash, msg.sender, fileName, block.timestamp);
+            _emitDevice(fileHash, false);
         } else {
             emit FileUpdated(fileHash, msg.sender, block.timestamp);
+            _emitDevice(fileHash, true);
         }
     }
 
     /**
      * Store single file using FileMetadata struct
      */
-    function storeFileWithStruct(FileMetadata memory fileData) public {
+    function storeFileWithStruct(FileMetadata memory fileData) public onlyActiveDevice {
         require(bytes(fileData.fileName).length > 0, "File name cannot be empty");
         require(bytes(fileData.fileHash).length > 0, "File hash cannot be empty");
         require(bytes(fileData.uploader).length > 0, "Uploader cannot be empty");
@@ -145,8 +291,10 @@ contract FileProtectionContract {
         if (!isUpdate) {
             fileHashes.push(fileData.fileHash);
             emit FileStored(fileData.fileHash, msg.sender, fileData.fileName, block.timestamp);
+            _emitDevice(fileData.fileHash, false);
         } else {
             emit FileUpdated(fileData.fileHash, msg.sender, block.timestamp);
+            _emitDevice(fileData.fileHash, true);
         }
     }
 
@@ -161,7 +309,7 @@ contract FileProtectionContract {
         uint256[] memory fileSizes,
         string[] memory filePaths,
         string[] memory descriptions
-    ) public {
+    ) public onlyActiveDevice {
         require(fileNames.length > 0, "No files provided");
         require(
             fileNames.length == ids.length &&
@@ -200,9 +348,11 @@ contract FileProtectionContract {
                 fileHashes.push(fileHashes_[i]);
                 newFilesCount++;
                 emit FileStored(fileHashes_[i], msg.sender, fileNames[i], block.timestamp);
+                _emitDevice(fileHashes_[i], false);
             } else {
                 updatedFilesCount++;
                 emit FileUpdated(fileHashes_[i], msg.sender, block.timestamp);
+                _emitDevice(fileHashes_[i], true);
             }
         }
 
@@ -212,7 +362,7 @@ contract FileProtectionContract {
     /**
      * Batch store multiple files using FileMetadata struct array (NEW!)
      */
-    function batchStoreFileWithStruct(FileMetadata[] memory fileDataArray) public {
+    function batchStoreFileWithStruct(FileMetadata[] memory fileDataArray) public onlyActiveDevice {
         require(fileDataArray.length > 0, "No files provided");
 
         uint256 newFilesCount = 0;
@@ -244,9 +394,11 @@ contract FileProtectionContract {
                 fileHashes.push(fileData.fileHash);
                 newFilesCount++;
                 emit FileStored(fileData.fileHash, msg.sender, fileData.fileName, block.timestamp);
+                _emitDevice(fileData.fileHash, false);
             } else {
                 updatedFilesCount++;
                 emit FileUpdated(fileData.fileHash, msg.sender, block.timestamp);
+                _emitDevice(fileData.fileHash, true);
             }
         }
 
