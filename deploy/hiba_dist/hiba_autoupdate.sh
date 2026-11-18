@@ -13,6 +13,7 @@
 #   - jar 裡附帶的新版 hiba_autoupdate.sh 和這支不同 → 換成新版（下次執行生效）
 #   - hiba.service 還是 Restart=on-failure → 改成 Restart=always
 #   - 軟體 TPM（swtpm-hiba）：調寬字典攻擊保護；被鎖定時自動解除
+# 另外會同步 accounting server 的檔案合約位址（換新合約時自動改 env.json 並重啟 HiBA）。
 # 所以節點只要 jar 是最新版，這些設定也會跟著更新，不用再手動執行 install_node.sh / setup_node.sh。
 #
 # HiBA 原本沒在執行（例如手動停掉）時只換 jar，不會啟動它。
@@ -252,6 +253,76 @@ try:
 except Exception:
     pass
 EOF
+
+# 檔案合約位址同步：accounting server（env.json 設定的那台，和 jar 來源相同）換了新的 FileProtectionContract
+# （deploy_contracts.sh --file-only）時，自動改本機 env.json 並重啟 HiBA，不必逐台手動修改。
+# 安全檢查（用本機 env.json 的 RPC 直接問鏈，不只相信 accounting server）：
+#   新位址上要有合約；且要是新版檔案合約（有 deviceRegistry()），指向的設備登記合約要和本機設定的相同。
+#   舊版檔案合約沒有 deviceRegistry()，所以不會被「同步回」舊合約。
+CONTRACT_CHANGE="$(python3 - "$ACCT" "$DIR/env.json" <<'EOF' 2>/dev/null
+import json, re, shutil, sys, time, urllib.request
+acct, path = sys.argv[1:3]
+ADDR = re.compile(r"^0x[0-9a-fA-F]{40}$")
+try:
+    remote = json.load(urllib.request.urlopen(f"http://{acct}:8092/api/chain", timeout=10))["contracts"]["file"]
+    env = json.load(open(path))
+    local = env["BlockchainFileProtect"]["contractAddress"]
+    registry = env["BlockchainTPMRegistry"]["contractAddress"]
+    rpc = env["Blockchain"]["rpcURL"]
+except Exception:
+    sys.exit(0)
+if not remote or not ADDR.match(remote) or remote.lower() == str(local).lower():
+    sys.exit(0)
+
+def rpc_call(method, params):
+    req = urllib.request.Request(rpc, json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode(),
+                                 {"Content-Type": "application/json"})
+    return json.load(urllib.request.urlopen(req, timeout=10)).get("result")
+
+try:
+    code = rpc_call("eth_getCode", [remote, "latest"])
+    # deviceRegistry() 的 selector：0x5efb870a
+    reg = rpc_call("eth_call", [{"to": remote, "data": "0x5efb870a"}, "latest"])
+except Exception:
+    sys.exit(0)
+if not code or code == "0x" or not reg or len(reg) < 66:
+    print(f"SKIP accounting server 的檔案合約 {remote} 不是新版或鏈上沒有，沿用 {local}")
+    sys.exit(0)
+if ("0x" + reg[-40:]).lower() != str(registry).lower():
+    print(f"SKIP 檔案合約 {remote} 指向的設備登記合約和本機設定的 {registry} 不同，沿用 {local}")
+    sys.exit(0)
+shutil.copy2(path, f"{path}.bak-contract-{time.strftime('%Y%m%d-%H%M%S')}")
+env["BlockchainFileProtect"]["contractAddress"] = remote
+with open(path, "w") as f:
+    json.dump(env, f, indent=4, ensure_ascii=False)
+print(f"CHANGED {local} {remote}")
+EOF
+)"
+case "$CONTRACT_CHANGE" in
+    CHANGED*)
+        read -r _ OLD_C NEW_C <<< "$CONTRACT_CHANGE"
+        own "$DIR"/env.json.bak-contract-*
+        chmod 600 "$DIR/env.json"
+        log "檔案合約已改為 $NEW_C（原本 $OLD_C；env.json 已備份）"
+        if [ "$RUNNING" = 1 ]; then
+            if use_systemd; then
+                systemctl restart "$UNIT" && log "已重啟 HiBA 套用新的檔案合約"
+            else
+                stop_hiba
+                start_and_check && log "已重啟 HiBA 套用新的檔案合約" || log "重啟 HiBA 失敗，請手動檢查"
+            fi
+        fi
+        ;;
+    SKIP*)
+        # 同樣的訊息只記一次
+        MARK="$DIR/.contract-skip"
+        if [ "$(cat "$MARK" 2>/dev/null)" != "$CONTRACT_CHANGE" ]; then
+            log "${CONTRACT_CHANGE#SKIP }"
+            echo "$CONTRACT_CHANGE" > "$MARK"
+            own "$MARK"
+        fi
+        ;;
+esac
 
 if ! [[ "$REMOTE" =~ ^[0-9a-f]{32}$ ]]; then
     echo "accounting server $ACCT 沒有提供版本資訊（連不到，或還是舊版程式），略過"
