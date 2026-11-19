@@ -745,6 +745,14 @@ curl -X POST http://localhost:8092/ \
 | `FileMetadataTestBlockchainSupport.java` | 檔案保護測試用區塊鏈輔助 |
 | `TestRunner.java` | 測試執行器 |
 
+#### 區塊鏈離線容錯測試
+
+| 測試類別 | 檔案 | 說明 |
+|----------|------|------|
+| 斷路器 | `ChainCircuitBreakerTest.java` | RPC 連不上時暫停查詢、試探、恢復 |
+| 最後已知公鑰 | `PublicKeyCacheLastKnownTest.java` | 鏈離線時沿用公鑰、24 小時過期、寫檔與重啟後讀回 |
+| 實機測試 | [`CHAIN_OFFLINE_TEST.md`](CHAIN_OFFLINE_TEST.md) | Besu 停止、accounting server 主機關機、兩個 broker 合併的手動測試步驟與紀錄 |
+
 ### 9.2 執行測試
 
 ```bash
@@ -793,6 +801,8 @@ mvn test -Dspotless.check.skip=true
 2. **Nonce 管理：** 多次快速交易可能導致 `replacement transaction underpriced`，已改用 `FastRawTransactionManager`
 3. **程式碼格式：** 提交前執行 `make format`（Spotless + Palantir Java Format）
 4. **測試隔離：** Mock 模式和真實區塊鏈模式透過 System Property 切換，不要混用
+5. **TPM 一律上鏈註冊：** accounting server、broker 以及所有節點的 TPM 都必須在 `TPMDeviceRegistry` 註冊。未註冊的機器在區塊鏈離線時會被其他節點拒絕（見 [`CHAIN_OFFLINE_TEST.md`](CHAIN_OFFLINE_TEST.md)）。`install_node.sh` 會自動註冊；手動設定的機器要用 `deploy/hiba_dist/register_node.sh` 補註冊
+6. **修改驗章、公鑰快取、broker 選舉相關程式後：** 依 [`CHAIN_OFFLINE_TEST.md`](CHAIN_OFFLINE_TEST.md) 重新做實機測試，並在第 6 節新增一筆紀錄
 
 ---
 
