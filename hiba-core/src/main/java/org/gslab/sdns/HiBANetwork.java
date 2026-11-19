@@ -339,6 +339,10 @@ public class HiBANetwork implements SdnNetwork {
             startServer(new InetSocketAddress("0.0.0.0", AcctRole.acctPort()), true);
             new Thread(acctClientKeepAliver).start(); // accounting server receives and management the lower layer
             // broker check.
+            // 專用的 accounting server 沒有上層可以報告：自己每 5 秒記一次，節點狀態頁的根卡片才有 EK、鏈上註冊與錢包
+            Thread selfReporter = new Thread(this::reportSelfLoop, "acct-self-report");
+            selfReporter.setDaemon(true);
+            selfReporter.start();
         } else {
             if (HiBAInitial.MobileControllerState || !HiBAInitial.hibaNetworkInterfaceInfo.isEmpty()) {
                 if (HiBAInitial.MobileControllerState) {
@@ -1593,6 +1597,19 @@ public class HiBANetwork implements SdnNetwork {
             }
         }
         return ek;
+    }
+
+    /** 專用 accounting server 的自我報告迴圈（見 {@link NodeStatusRegistry#onSelfReport}） */
+    private void reportSelfLoop() {
+        while (!Thread.currentThread().isInterrupted()) {
+            try {
+                NodeStatusRegistry.get()
+                        .onSelfReport(LOCAL_IP, localEk(), summarizeResources(localResourceSource.get()));
+            } catch (Exception e) {
+                logger.atDebug().setCause(e).log("Failed to record accounting server self report");
+            }
+            delay(NODE_REPORT_INTERVAL_SEC);
+        }
     }
 
     /** 把資源資料縮成少量「鍵 → 短字串」，避免報告過大 */

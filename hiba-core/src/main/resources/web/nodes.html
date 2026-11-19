@@ -470,6 +470,25 @@
   const acctActingLine = (d) => d && d.accountingServer && d.accountingServer.acting
     ? `<span class="small" title="最頂層 broker 擔任 accounting server">由 <strong>${esc(d.accountingServer.name || "")}</strong> 擔任</span>`
     : "";
+  // 專用 accounting server 自己的狀態（EK、鏈上註冊、錢包、資源）；由 broker 兼任時那台已經是樹裡的一張卡片，這裡為 null
+  const acctSelf = (d) => (d && d.accountingServer && !d.accountingServer.acting && d.accountingServer.self) || null;
+  // 根卡片底部的徽章：「運作中」加上它自己的上鏈狀態；自我報告停了（超過離線時間）就標出來
+  const acctBadges = (d) => {
+    const s = acctSelf(d);
+    if (s && s.status !== "online") return `<span class="badge b-warn" title="accounting server 自己的狀態超過 ${d.onlineTimeoutMs / 1000} 秒沒有更新">${icon("alert")}自我報告停止</span>`;
+    return `<span class="badge b-ok">${icon("check")}運作中</span>${s ? cardChainBadge(s.chain) : ""}`;
+  };
+  // 詳細面板裡的「鏈上註冊」「上鏈錢包」兩列（節點與專用 accounting server 共用）
+  const chainRows = (c) => `
+        <dt>鏈上註冊</dt><dd>${chainBadge(c)}${c.registeredAt ? `<div class="muted small">${esc(fmtTime(c.registeredAt * 1000))} 註冊</div>` : ""}</dd>
+        <dt>上鏈錢包</dt><dd>${walletBadge(c) || "–"}${c.wallet ? `<div class="muted small">${walletOf(c) ? esc(walletOf(c)[3]) : ""}</div>
+          ${c.wallet.bound ? `<div class="small">鏈上綁定 <span class="mono">${esc(c.wallet.bound)}</span></div>` : ""}
+          ${c.wallet.reported && c.wallet.reported !== c.wallet.bound ? `<div class="small">節點回報 <span class="mono">${esc(c.wallet.reported)}</span></div>` : ""}` : ""}</dd>`;
+  const resChips = (r) => {
+    const keys = Object.keys(r || {}).sort();
+    return keys.length ? `<span class="chips">${keys.map((k) =>
+      `<span class="chip">${esc(resLabel(k))} ${esc(resValue(k, r[k]))}</span>`).join("")}</span>` : "–";
+  };
   // 節點轉送失敗時回 {"error": "..."}，顯示這段說明而不只是 HTTP 狀態碼
   const errorText = async (r) => {
     try { const j = await r.json(); if (j && j.error) return j.error; } catch (e) { /* ignore */ }
@@ -598,7 +617,7 @@
         card = `<div class="node root is-online">
             <div class="node-h"><span class="kind root">${icon("server")}</span><span class="name">Accounting server</span></div>${acctActingLine(d)}
             <span class="mono">${esc(acctHost(d))}</span>${acctVersionLine(d)}
-            <div class="node-f"><span class="badge b-ok">${icon("check")}運作中</span><span>${sub.online}/${sub.total} 在線</span></div>
+            <div class="node-f">${acctBadges(d)}<span>${sub.online}/${sub.total} 在線</span></div>
           </div>`;
       } else {
         const broker = n.role === "broker";
@@ -726,7 +745,7 @@
             <div class="node root is-online">
               <div class="node-h"><span class="kind root">${icon("server")}</span><span class="name">Accounting server</span></div>${acctActingLine(d)}
               <span class="mono">${esc(acctHost(d))}</span>${acctVersionLine(d)}
-              <div class="node-f"><span class="badge b-ok">${icon("check")}運作中</span><span>${pm.nets.size} 個網段・${online}/${d.nodes.length} 在線</span></div>
+              <div class="node-f">${acctBadges(d)}<span>${pm.nets.size} 個網段・${online}/${d.nodes.length} 在線</span></div>
             </div>
             ${kids.length ? `<ul role="group">${kids.map((c) => item(c, 2, ROOT)).join("")}</ul>` : ""}</li>`;
       }
@@ -745,7 +764,7 @@
       const rows = [
         hasAcct ? `<div role="listitem"><div class="pn acct" aria-label="Accounting server"><span class="dot" aria-hidden="true"></span>
             <span class="kind root" style="width:22px;height:22px">${icon("server")}</span><span class="pn-text"><span class="pn-name">Accounting server</span>
-            <span class="mono">${esc(acctHost(d))}</span></span></div></div>` : "",
+            <span class="mono">${esc(acctHost(d))}</span></span>${acctSelf(d) ? walletMark(acctSelf(d).chain) : ""}</div></div>` : "",
         ...shown.map(row),
       ].join("");
       const hidden = net.nodes.length - shown.length;
@@ -827,12 +846,13 @@
              <dt>版本</dt><dd>${acctVersionBadge(d)}<div class="muted small mono">${esc(acctMd5(d) || "–")}</div>
                ${acctStale(d) ? `<div class="muted small">jar 檔已換成新版，但程式還沒重啟；重啟後才會生效。</div>` : ""}</dd>
              <dt>啟動時間</dt><dd>${d.accountingServer && d.accountingServer.startedAt ? `${esc(fmtTime(d.accountingServer.startedAt))}<div class="muted small">${ago(d.accountingServer.startedAt, d.generatedAt || Date.now())}</div>` : "–"}</dd>
-             <dt>提供的 jar</dt><dd class="mono">${esc((d.dist && d.dist.md5) || "沒有（節點無法自動更新）")}</dd></dl>`
+             <dt>提供的 jar</dt><dd class="mono">${esc((d.dist && d.dist.md5) || "沒有（節點無法自動更新）")}</dd>
+             ${acctSelf(d) ? `<dt>資源</dt><dd>${resChips(acctSelf(d).resources)}</dd>${chainRows(acctSelf(d).chain || {})}
+             <dt>EK</dt><dd class="mono">${esc(acctSelf(d).ek || "未回報（沒有 TPM 或讀取失敗）")}</dd>` : ""}</dl>`
         : `<p class="detail-empty">點一個節點查看詳細資料。</p>`;
       return;
     }
     const now = d.generatedAt || Date.now();
-    const res = Object.keys(n.resources || {}).sort();
     const c = n.chain || {};
     $("detail").innerHTML = `
       <dl class="dl">
@@ -844,12 +864,7 @@
         <dt>IP</dt><dd class="mono">${esc(n.ip || "–")}</dd>
         <dt>最後出現</dt><dd>${ago(n.lastSeen, now)}<div class="muted small">${esc(fmtTime(n.lastSeen))}</div></dd>
         <dt>首次出現</dt><dd>${esc(fmtTime(n.firstSeen))}</dd>
-        <dt>資源</dt><dd>${res.length ? `<span class="chips">${res.map((k) =>
-            `<span class="chip">${esc(resLabel(k))} ${esc(resValue(k, n.resources[k]))}</span>`).join("")}</span>` : "–"}</dd>
-        <dt>鏈上註冊</dt><dd>${chainBadge(c)}${c.registeredAt ? `<div class="muted small">${esc(fmtTime(c.registeredAt * 1000))} 註冊</div>` : ""}</dd>
-        <dt>上鏈錢包</dt><dd>${walletBadge(c) || "–"}${c.wallet ? `<div class="muted small">${walletOf(c) ? esc(walletOf(c)[3]) : ""}</div>
-          ${c.wallet.bound ? `<div class="small">鏈上綁定 <span class="mono">${esc(c.wallet.bound)}</span></div>` : ""}
-          ${c.wallet.reported && c.wallet.reported !== c.wallet.bound ? `<div class="small">節點回報 <span class="mono">${esc(c.wallet.reported)}</span></div>` : ""}` : ""}</dd>
+        <dt>資源</dt><dd>${resChips(n.resources)}</dd>${chainRows(c)}
         <dt>版本</dt><dd>${versionBadge(n.version)}${n.version ? `<div class="muted small"><span class="mono">${esc(shortMd5(n.version.md5))}</span>，${n.version.running ? "HiBA 執行中" : "HiBA 未執行"}，${ago(n.version.checkedAt, now)}檢查</div>` : ""}</dd>
         <dt>EK</dt><dd class="mono">${esc(n.ek || "未回報（未啟用 TPM 簽章）")}</dd>
       </dl>

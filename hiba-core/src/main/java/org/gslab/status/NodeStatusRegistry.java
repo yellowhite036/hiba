@@ -63,6 +63,11 @@ public final class NodeStatusRegistry {
     private volatile String actingAddress; // 由根網段的 broker 擔任時是它的 IP；專用的 accounting server 為 null
 
     private final Map<String, NodeRecord> nodes = new ConcurrentHashMap<>(); // nodeName → 最後一次看到的資料
+    /**
+     * 專用的 accounting server 自己（{@link #onSelfReport}）。另外存、不放進 {@link #nodes}：
+     * 不會和同名的 broker 互相覆蓋、不算進 summary、也不會在節點樹裡多畫一張卡片。
+     */
+    private volatile SelfRecord self;
     private final Deque<JSONObject> stepDowns = new ArrayDeque<>(); // 新的在前，存取時要 synchronized
     private final Map<String, VersionRecord> versions = new ConcurrentHashMap<>(); // nodeName → 最後一次回報的版本
 
@@ -115,6 +120,7 @@ public final class NodeStatusRegistry {
             return;
         }
         enabled = false;
+        self = null;
         nodes.clear();
         versions.clear();
         synchronized (stepDowns) {
@@ -171,6 +177,35 @@ public final class NodeStatusRegistry {
         for (NodeStatusReport.NodeEntry node : report.getNodes()) {
             update(node, broker.getName(), node.getEkFingerprint(), node.getIp(), now);
         }
+    }
+
+    /**
+     * 專用的 accounting server 每 5 秒記一次自己的狀態（沒有上層可以報告）。
+     * 由 broker 兼任時不用：那台 broker 照常以 {@link #onReport} 報告自己與底下的節點。
+     *
+     * @param ip 本機 IP；專用 server 通常不知道（null），網頁改用它的網址主機
+     * @param ek 本機 EK 指紋；沒有 TPM 時為 null
+     */
+    public void onSelfReport(String ip, String ek, Map<String, String> resources) {
+        if (!enabled || isActing()) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        SelfRecord old = self;
+        Map<String, String> res = new TreeMap<>();
+        if (resources != null) {
+            resources.forEach((k, v) -> {
+                if (k != null && v != null) {
+                    res.put(k, v);
+                }
+            });
+        }
+        self = new SelfRecord(
+                old == null ? now : old.firstSeen(),
+                now,
+                ip != null && !ip.isEmpty() ? ip : (old == null ? null : old.ip()),
+                ek != null && !ek.isEmpty() ? ek : (old == null ? null : old.ek()),
+                Map.copyOf(res));
     }
 
     public void onStepDown(BrokerStepDownNotice notice) {
@@ -356,19 +391,10 @@ public final class NodeStatusRegistry {
                     brokers++;
                 }
             }
-            JSONObject chainInfo = new JSONObject().put("checked", ok && r.ek != null);
             if (r.ek != null) {
                 seenEks.add(r.ek);
-                if (ok) {
-                    TPMDeviceRegistry.DeviceInfo info = devices.get(r.ek);
-                    chainInfo.put("registered", info != null);
-                    chainInfo.put("active", info != null && info.active());
-                    if (info != null) {
-                        chainInfo.put("registeredAt", info.registeredAt().longValue());
-                        chainInfo.put("wallet", walletJson(r.ek));
-                    }
-                }
             }
+            JSONObject chainInfo = chainJson(r.ek, ok, devices);
             nodeArray.put(new JSONObject()
                     .put("name", r.name)
                     .put("ip", nullToJson(r.ip))
@@ -382,6 +408,23 @@ public final class NodeStatusRegistry {
                     .put("chain", chainInfo)
                     .put("version", versionJson(versions.get(r.name), distMd5))
                     .put("resources", new JSONObject(r.resources)));
+        }
+
+        // 專用 accounting server 自己（兼任時它已經在 nodes 裡）
+        SelfRecord me = isActing() ? null : self;
+        Object selfJson = JSONObject.NULL;
+        if (me != null) {
+            if (me.ek() != null) {
+                seenEks.add(me.ek());
+            }
+            selfJson = new JSONObject()
+                    .put("ip", nullToJson(me.ip()))
+                    .put("status", now - me.lastSeen() <= ONLINE_TIMEOUT_MS ? "online" : "offline")
+                    .put("firstSeen", me.firstSeen())
+                    .put("lastSeen", me.lastSeen())
+                    .put("ek", nullToJson(me.ek()))
+                    .put("chain", chainJson(me.ek(), ok, devices))
+                    .put("resources", new JSONObject(me.resources()));
         }
 
         JSONArray neverSeen = new JSONArray();
@@ -408,6 +451,7 @@ public final class NodeStatusRegistry {
                                 .put("startedAt", startedAt)
                                 .put("acting", actingAddress != null)
                                 .put("address", nullToJson(actingAddress))
+                                .put("self", selfJson)
                                 .put(
                                         "version",
                                         new JSONObject()
@@ -435,6 +479,21 @@ public final class NodeStatusRegistry {
                                 .put("error", nullToJson(chainError)));
     }
 
+    /** 一台設備在 TPMDeviceRegistry 上的註冊狀態與綁定的錢包 */
+    private JSONObject chainJson(String ek, boolean ok, Map<String, TPMDeviceRegistry.DeviceInfo> devices) {
+        JSONObject chainInfo = new JSONObject().put("checked", ok && ek != null);
+        if (ek != null && ok) {
+            TPMDeviceRegistry.DeviceInfo info = devices.get(ek);
+            chainInfo.put("registered", info != null);
+            chainInfo.put("active", info != null && info.active());
+            if (info != null) {
+                chainInfo.put("registeredAt", info.registeredAt().longValue());
+                chainInfo.put("wallet", walletJson(ek));
+            }
+        }
+        return chainInfo;
+    }
+
     /** 節點沒裝自動更新（從沒回報過）時為 JSON null */
     private static Object versionJson(VersionRecord v, String distMd5) {
         if (v == null) {
@@ -454,6 +513,8 @@ public final class NodeStatusRegistry {
     private static Object nullToJson(Object value) {
         return value == null ? JSONObject.NULL : value;
     }
+
+    private record SelfRecord(long firstSeen, long lastSeen, String ip, String ek, Map<String, String> resources) {}
 
     private record VersionRecord(String md5, boolean running, long checkedAt, String remoteIp) {}
 
