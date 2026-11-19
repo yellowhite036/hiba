@@ -80,8 +80,19 @@ public class Web3jBlockchainServiceImpl implements BlockchainService {
             throw new IllegalArgumentException("Unsupported RPC URL scheme. Use http(s):// or ws(s)://");
         }
 
-        // Verify connection
-        verifyConnection();
+        // Verify connection：HTTP 模式下連不上只記警告，不讓 HiBA 啟動失敗
+        // （以前區塊鏈離線時節點完全無法啟動；HTTP 每次呼叫都會重新連線，鏈恢復後上鏈功能自動恢復）
+        if (webSocketService == null) {
+            try {
+                verifyConnection();
+            } catch (Exception e) {
+                log.warn(
+                        "Blockchain not reachable at startup, file protection will work once it is back: {}",
+                        e.getMessage());
+            }
+        } else {
+            verifyConnection();
+        }
 
         // Initialize credentials
         this.credentials = Credentials.create(privateKey);

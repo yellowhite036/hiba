@@ -91,6 +91,8 @@ public class Web3BlockchainService implements AutoCloseable {
         breaker.onRecovered(() -> {
             lastKnownNotified.clear();
             if (cacheService != null) {
+                // PublicKeyCacheService 的 log 受 TPM_LOG_LEVEL 限制（預設不顯示），在這裡記錄
+                log.info("[Blockchain] Re-verifying all cached public keys against the blockchain");
                 cacheService.expireAllFresh();
             }
         });
