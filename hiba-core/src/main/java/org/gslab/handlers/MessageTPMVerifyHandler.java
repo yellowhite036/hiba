@@ -15,6 +15,7 @@ import java.util.Base64;
 import java.util.Date;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import lombok.extern.slf4j.Slf4j;
 import org.gslab.configuration.MessageVerificationConfig;
 import org.gslab.message_hiba.Message;
@@ -39,6 +40,10 @@ import org.json.JSONObject;
  * <li><b>BLOCKCHAIN_STRICT</b>：必須使用區塊鏈上已註冊的公鑰</li>
  * <li><b>BLOCKCHAIN_PREFERRED</b>：優先使用區塊鏈公鑰，否則使用封包公鑰</li>
  * </ul>
+ * <p>
+ * 區塊鏈連不上時（兩種區塊鏈模式都適用）：之前從鏈上驗證過的設備沿用最後已知公鑰（最多 24 小時）；
+ * 從沒驗證過的設備一律拒絕，不改用封包內的公鑰，等鏈恢復後才能加入。
+ * </p>
  *
  * <h2>Pipeline 位置</h2>
  *
@@ -78,6 +83,11 @@ public class MessageTPMVerifyHandler extends SimpleChannelInboundHandler<Message
      * 節點狀態頁用它得知 broker 與各下層節點的 EK（沒開 TPM 簽章時不會設定）。
      */
     public static final AttributeKey<String> PEER_EK_FINGERPRINT = AttributeKey.valueOf("hiba.peerEkFingerprint");
+
+    /** 鏈離線時被拒絕的設備 → 上次記錄 log 的時間（同一台每分鐘最多記一次，避免重連時洗版） */
+    private static final Map<String, Long> CHAIN_DOWN_REJECT_LOGGED = new ConcurrentHashMap<>();
+
+    private static final long CHAIN_DOWN_REJECT_LOG_INTERVAL_MS = 60_000;
 
     private final VerificationMode mode;
     private final Web3BlockchainService blockchainService;
@@ -198,6 +208,13 @@ public class MessageTPMVerifyHandler extends SimpleChannelInboundHandler<Message
 
             // 3. 取得用於驗證的公鑰
             PublicKey verificationKey = getVerificationKey(signedMessage);
+            if (verificationKey == null && isChainUnavailable()) {
+                logChainDownRejection(ctx, signedMessage.getDeviceId());
+                handleVerificationFailure(
+                        ctx,
+                        MessageVerificationResult.failure(MessageVerificationResult.ErrorCode.BLOCKCHAIN_UNAVAILABLE));
+                return;
+            }
             if (verificationKey == null) {
                 log.error("Failed to obtain verification public key");
                 handleVerificationFailure(
@@ -243,6 +260,32 @@ public class MessageTPMVerifyHandler extends SimpleChannelInboundHandler<Message
                     ctx,
                     MessageVerificationResult.failure(MessageVerificationResult.ErrorCode.PARSE_ERROR, e.getMessage()));
         }
+    }
+
+    /** 使用區塊鏈驗證、而區塊鏈目前連不上 */
+    private boolean isChainUnavailable() {
+        return mode != VerificationMode.TRUST_PACKAGE
+                && blockchainService != null
+                && !blockchainService.isChainAvailable();
+    }
+
+    private void logChainDownRejection(ChannelHandlerContext ctx, String deviceId) {
+        String key = deviceId == null ? "" : deviceId;
+        long now = System.currentTimeMillis();
+        Long last = CHAIN_DOWN_REJECT_LOGGED.get(key);
+        if (last != null && now - last < CHAIN_DOWN_REJECT_LOG_INTERVAL_MS) {
+            return;
+        }
+        if (CHAIN_DOWN_REJECT_LOGGED.size() > 1000) {
+            CHAIN_DOWN_REJECT_LOGGED.clear();
+        }
+        CHAIN_DOWN_REJECT_LOGGED.put(key, now);
+        log.warn(
+                "Rejected device {}... from {}: blockchain unreachable ({}) and this device was not verified before;"
+                        + " it can join after the blockchain is back",
+                truncate(deviceId, 16),
+                ctx.channel().remoteAddress(),
+                blockchainService.chainUnavailableReason());
     }
 
     /**
@@ -307,6 +350,9 @@ public class MessageTPMVerifyHandler extends SimpleChannelInboundHandler<Message
             if (blockchainKey.isPresent()) {
                 log.debug("Using blockchain public key for verification");
                 return blockchainKey.get();
+            }
+            if (!blockchainService.isChainAvailable()) {
+                return null; // 鏈連不上、也沒有最後已知公鑰：拒絕，不改用封包公鑰
             }
             log.warn("Device not registered on blockchain, using package public key (lower security)");
         }

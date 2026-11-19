@@ -21,6 +21,7 @@ import java.io.FileWriter;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.InetSocketAddress;
+import java.nio.file.Path;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -83,6 +84,7 @@ import org.gslab.sdnMobileControl.multicast.MobileMulticastReceiver;
 import org.gslab.mService.multicast.MulticastController;
 import org.gslab.mService.multicast.MulticastReceiver;
 import org.gslab.mService.multicast.Traceroute;
+import org.gslab.tpm.LastKnownKeyStore;
 import org.gslab.tpm.PublicKeyCacheService;
 import org.gslab.tpm.blockchain.Web3BlockchainService;
 import org.gslab.mService.NTPServer;
@@ -195,7 +197,7 @@ public class HiBANetwork implements SdnNetwork {
                 .rpcUrl(tpmDeviceRegistryConfig.getRpcUrl())
                 .contractAddress(tpmDeviceRegistryConfig.getContractAddress())
                 .privateKey(tpmDeviceRegistryConfig.getPrivateKey())
-                .cacheService(new PublicKeyCacheService())
+                .cacheService(new PublicKeyCacheService(Path.of(LastKnownKeyStore.DEFAULT_FILE)))
                 .build();
 
         clientBootstrap = new Bootstrap()
@@ -284,7 +286,7 @@ public class HiBANetwork implements SdnNetwork {
                 .rpcUrl(tpmDeviceRegistryConfig.getRpcUrl())
                 .contractAddress(tpmDeviceRegistryConfig.getContractAddress())
                 .privateKey(tpmDeviceRegistryConfig.getPrivateKey())
-                .cacheService(new PublicKeyCacheService())
+                .cacheService(new PublicKeyCacheService(Path.of(LastKnownKeyStore.DEFAULT_FILE)))
                 .build();
 
         // 節點狀態頁（/nodes、/api/nodes）只在 accounting server 上啟用

@@ -25,6 +25,7 @@ public class MessageVerificationResult {
         SIGNATURE_INVALID("SIGNATURE_INVALID", "簽章驗證失敗"),
         PUBLIC_KEY_MISMATCH("PUBLIC_KEY_MISMATCH", "公鑰不匹配"),
         DEVICE_NOT_REGISTERED("DEVICE_NOT_REGISTERED", "設備未註冊"),
+        BLOCKCHAIN_UNAVAILABLE("BLOCKCHAIN_UNAVAILABLE", "區塊鏈暫時連不上，無法驗證之前沒驗證過的設備"),
         PARSE_ERROR("PARSE_ERROR", "封包解析錯誤"),
         INTERNAL_ERROR("INTERNAL_ERROR", "內部錯誤");
 

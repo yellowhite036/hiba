@@ -5,6 +5,7 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.RemovalCause;
 import com.github.benmanes.caffeine.cache.Ticker;
 import com.github.benmanes.caffeine.cache.stats.CacheStats;
+import java.nio.file.Path;
 import java.security.PublicKey;
 import java.time.Duration;
 import java.util.Optional;
@@ -25,7 +26,7 @@ import lombok.extern.slf4j.Slf4j;
  * <li>過期時間：寫入後 1 小時過期</li>
  * <li>存取刷新：存取後延長 30 分鐘</li>
  * <li>統計資訊：啟用快取命中率統計</li>
- * <li>最後已知公鑰：另外保留每台設備最後一次從鏈上驗證過的公鑰 24 小時，
+ * <li>最後已知公鑰：另外保留每台設備最後一次從鏈上驗證過的公鑰 24 小時（{@link LastKnownKeyStore}，可寫入檔案），
  *     只在區塊鏈連不上時使用（{@link #getLastKnown}），讓 Pi 離線期間已知設備仍以鏈上公鑰驗章</li>
  * </ul>
  *
@@ -74,7 +75,7 @@ public class PublicKeyCacheService {
      * 最後一次驗證過的公鑰（區塊鏈連不上時的備援）。
      * 與 {@link #cache} 同時寫入、同時撤銷，但不因存取逾時過期，只在最後寫入後 {@link #LAST_KNOWN_MAX_AGE} 過期。
      */
-    private final Cache<String, PublicKey> lastKnown;
+    private final LastKnownKeyStore lastKnown;
 
     /**
      * 統計計數器
@@ -89,6 +90,20 @@ public class PublicKeyCacheService {
     }
 
     /**
+     * 最後已知公鑰寫入檔案：節點在區塊鏈離線期間重啟，仍認得重啟前驗證過的設備。
+     *
+     * @param lastKnownFile 保存檔（例如 {@link LastKnownKeyStore#DEFAULT_FILE}）
+     */
+    public PublicKeyCacheService(Path lastKnownFile) {
+        this(
+                MAX_CACHE_SIZE,
+                EXPIRE_AFTER_WRITE,
+                EXPIRE_AFTER_ACCESS,
+                new LastKnownKeyStore(lastKnownFile, LAST_KNOWN_MAX_AGE, MAX_CACHE_SIZE, System::currentTimeMillis),
+                Ticker.systemTicker());
+    }
+
+    /**
      * 建構子 - 自訂快取配置
      *
      * @param maxCacheSize      最大快取容量
@@ -96,23 +111,24 @@ public class PublicKeyCacheService {
      * @param expireAfterAccess 存取後刷新過期時間(分鐘)
      */
     public PublicKeyCacheService(int maxCacheSize, Duration expireAfterWrite, Duration expireAfterAccess) {
-        this(maxCacheSize, expireAfterWrite, expireAfterAccess, LAST_KNOWN_MAX_AGE, Ticker.systemTicker());
+        this(
+                maxCacheSize,
+                expireAfterWrite,
+                expireAfterAccess,
+                new LastKnownKeyStore(null, LAST_KNOWN_MAX_AGE, maxCacheSize, System::currentTimeMillis),
+                Ticker.systemTicker());
     }
 
-    /** 測試用：可指定最後已知公鑰的保留時間與時鐘 */
+    /** 測試用：可指定最後已知公鑰的保存方式與一般快取的時鐘 */
     PublicKeyCacheService(
             int maxCacheSize,
             Duration expireAfterWrite,
             Duration expireAfterAccess,
-            Duration lastKnownMaxAge,
+            LastKnownKeyStore lastKnown,
             Ticker ticker) {
         log.info("Initializing public key cache service...");
 
-        this.lastKnown = Caffeine.newBuilder()
-                .maximumSize(maxCacheSize)
-                .expireAfterWrite(lastKnownMaxAge)
-                .ticker(ticker)
-                .build();
+        this.lastKnown = lastKnown;
 
         // 建立 Caffeine 快取
         this.cache = Caffeine.newBuilder()
@@ -136,7 +152,7 @@ public class PublicKeyCacheService {
         log.info("   Max capacity: {} entries", maxCacheSize);
         log.info("   Write expiry: {}", expireAfterWrite);
         log.info("   Access expiry: {}", expireAfterAccess);
-        log.info("   Last-known key kept for: {} (used only while the blockchain is unreachable)", lastKnownMaxAge);
+        log.info("   Last-known keys: {} entries (used only while the blockchain is unreachable)", lastKnown.size());
     }
 
     /**
@@ -186,7 +202,7 @@ public class PublicKeyCacheService {
      * @return 公鑰；沒有驗證過或已超過 {@link #LAST_KNOWN_MAX_AGE} 時為 empty
      */
     public Optional<PublicKey> getLastKnown(final String ekFingerprint) {
-        return Optional.ofNullable(lastKnown.getIfPresent(ekFingerprint));
+        return lastKnown.get(ekFingerprint);
     }
 
     /**
@@ -208,7 +224,7 @@ public class PublicKeyCacheService {
     public void invalidate(final String ekFingerprint) {
         log.debug("Invalidating cache: {}...", truncate(ekFingerprint, 16));
         cache.invalidate(ekFingerprint);
-        lastKnown.invalidate(ekFingerprint);
+        lastKnown.remove(ekFingerprint);
     }
 
     /**
@@ -217,7 +233,7 @@ public class PublicKeyCacheService {
     public void invalidateAll() {
         log.warn("Clearing all cache entries");
         cache.invalidateAll();
-        lastKnown.invalidateAll();
+        lastKnown.clear();
     }
 
     /**
