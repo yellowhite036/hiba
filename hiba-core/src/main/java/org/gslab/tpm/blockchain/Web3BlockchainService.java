@@ -68,6 +68,8 @@ public class Web3BlockchainService implements AutoCloseable {
     private final Web3j web3j;
     private final TPMDeviceRegistry contract;
     private final PublicKeyCacheService cacheService;
+    /** RPC 連不上時暫停查詢，避免每次查詢都卡在連線逾時（見 {@link ChainCircuitBreaker}） */
+    private final ChainCircuitBreaker breaker = new ChainCircuitBreaker();
 
     // 事件訂閱
     private Disposable deviceRegisteredSubscription;
@@ -327,7 +329,9 @@ public class Web3BlockchainService implements AutoCloseable {
 
         // 快取未命中，從區塊鏈查詢並更新快取
         Optional<PublicKey> publicKey = getPublicKey(ekFingerprint);
-        publicKey.ifPresent(key -> cacheService.put(ekFingerprint, key));
+        if (cacheService != null) {
+            publicKey.ifPresent(key -> cacheService.put(ekFingerprint, key));
+        }
         return publicKey;
     }
 
@@ -338,11 +342,16 @@ public class Web3BlockchainService implements AutoCloseable {
      * @return 設備公鑰
      */
     public Optional<PublicKey> getPublicKey(String ekFingerprint) {
+        if (!breaker.allowRequest()) {
+            log.debug("[Blockchain] RPC unreachable, skipping public key query");
+            return Optional.empty();
+        }
         log.debug("[Blockchain] Querying device public key...");
         log.debug("   EK Fingerprint: {}...", truncate(ekFingerprint, 16));
 
         try {
             String publicKeyBase64 = contract.getPublicKey(ekFingerprint).send();
+            breaker.recordSuccess();
 
             if (publicKeyBase64 == null || publicKeyBase64.isEmpty()) {
                 log.warn("[Blockchain] Device not registered or revoked: {}...", truncate(ekFingerprint, 16));
@@ -355,7 +364,9 @@ public class Web3BlockchainService implements AutoCloseable {
             return Optional.of(publicKey);
 
         } catch (Exception e) {
-            log.error("[Blockchain] Query failed: {}", e.getMessage());
+            if (!breaker.recordFailure(e)) {
+                log.error("[Blockchain] Query failed: {}", e.getMessage());
+            }
             return Optional.empty();
         }
     }
@@ -364,10 +375,17 @@ public class Web3BlockchainService implements AutoCloseable {
      * 檢查設備是否已註冊
      */
     public boolean isDeviceRegistered(String ekFingerprint) {
+        if (!breaker.allowRequest()) {
+            return false;
+        }
         try {
-            return contract.isDeviceRegistered(ekFingerprint).send();
+            boolean result = contract.isDeviceRegistered(ekFingerprint).send();
+            breaker.recordSuccess();
+            return result;
         } catch (Exception e) {
-            log.error("[Blockchain] Failed to check device registration status: {}", e.getMessage());
+            if (!breaker.recordFailure(e)) {
+                log.error("[Blockchain] Failed to check device registration status: {}", e.getMessage());
+            }
             return false;
         }
     }
@@ -376,10 +394,17 @@ public class Web3BlockchainService implements AutoCloseable {
      * 檢查設備是否啟用中
      */
     public boolean isDeviceActive(String ekFingerprint) {
+        if (!breaker.allowRequest()) {
+            return false;
+        }
         try {
-            return contract.isDeviceActive(ekFingerprint).send();
+            boolean result = contract.isDeviceActive(ekFingerprint).send();
+            breaker.recordSuccess();
+            return result;
         } catch (Exception e) {
-            log.error("[Blockchain] Failed to check device active status: {}", e.getMessage());
+            if (!breaker.recordFailure(e)) {
+                log.error("[Blockchain] Failed to check device active status: {}", e.getMessage());
+            }
             return false;
         }
     }
@@ -388,10 +413,17 @@ public class Web3BlockchainService implements AutoCloseable {
      * 取得已註冊設備總數
      */
     public long getDeviceCount() {
+        if (!breaker.allowRequest()) {
+            return 0;
+        }
         try {
-            return contract.getDeviceCount().send().longValue();
+            long result = contract.getDeviceCount().send().longValue();
+            breaker.recordSuccess();
+            return result;
         } catch (Exception e) {
-            log.error("[Blockchain] Failed to get total device count: {}", e.getMessage());
+            if (!breaker.recordFailure(e)) {
+                log.error("[Blockchain] Failed to get total device count: {}", e.getMessage());
+            }
             return 0;
         }
     }
@@ -400,10 +432,17 @@ public class Web3BlockchainService implements AutoCloseable {
      * 取得啟用中設備數量
      */
     public long getActiveDeviceCount() {
+        if (!breaker.allowRequest()) {
+            return 0;
+        }
         try {
-            return contract.getActiveDeviceCount().send().longValue();
+            long result = contract.getActiveDeviceCount().send().longValue();
+            breaker.recordSuccess();
+            return result;
         } catch (Exception e) {
-            log.error("[Blockchain] Failed to get active device count: {}", e.getMessage());
+            if (!breaker.recordFailure(e)) {
+                log.error("[Blockchain] Failed to get active device count: {}", e.getMessage());
+            }
             return 0;
         }
     }
@@ -415,16 +454,24 @@ public class Web3BlockchainService implements AutoCloseable {
      * @return EK 指紋 → 註冊資訊（依註冊順序）
      */
     public Map<String, TPMDeviceRegistry.DeviceInfo> listRegisteredDevices() throws Exception {
+        // 背景執行（節點狀態頁），不受斷路器限制；但結果會告訴斷路器鏈是否恢復
         final int pageSize = 100;
-        long total = contract.getDeviceCount().send().longValue();
         Map<String, TPMDeviceRegistry.DeviceInfo> devices = new LinkedHashMap<>();
-        for (long offset = 0; offset < total; offset += pageSize) {
-            List<String> page = contract.getRegisteredDevices(BigInteger.valueOf(offset), BigInteger.valueOf(pageSize))
-                    .send();
-            for (String ek : page) {
-                devices.put(ek, contract.getDeviceInfo(ek).send());
+        try {
+            long total = contract.getDeviceCount().send().longValue();
+            for (long offset = 0; offset < total; offset += pageSize) {
+                List<String> page = contract.getRegisteredDevices(
+                                BigInteger.valueOf(offset), BigInteger.valueOf(pageSize))
+                        .send();
+                for (String ek : page) {
+                    devices.put(ek, contract.getDeviceInfo(ek).send());
+                }
             }
+        } catch (Exception e) {
+            breaker.recordFailure(e);
+            throw e;
         }
+        breaker.recordSuccess();
         return devices;
     }
 
@@ -662,6 +709,19 @@ public class Web3BlockchainService implements AutoCloseable {
     private String truncate(String str, int maxLength) {
         if (str == null) return "null";
         return str.length() > maxLength ? str.substring(0, maxLength) : str;
+    }
+
+    /**
+     * 區塊鏈目前是否可用（false＝RPC 連不上，查詢暫停中）。
+     * 查詢回傳空值時，可用它分辨「設備沒註冊」和「鏈暫時無法使用」。
+     */
+    public boolean isChainAvailable() {
+        return !breaker.isOpen();
+    }
+
+    /** 最近一次 RPC 連線失敗的原因；正常時為 null */
+    public String chainUnavailableReason() {
+        return breaker.lastError();
     }
 
     /**
