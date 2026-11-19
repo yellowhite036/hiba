@@ -93,7 +93,7 @@ public class MulticastReceiver implements Runnable {
                                     initList.put((String) information.get("nodeName"), information.get("ip"));
                                     MulticastController.addInitNode(initList);
                                 } else if (information.get("mode").equals("brokerBroadcast")
-                                        && !HiBANetwork.blackList.containsKey((String) information.get("nodeName"))) {
+                                        && !HiBANetwork.isBlacklisted((String) information.get("nodeName"))) {
                                     String nodeName = (String) information.get("nodeName");
                                     String ip = (String) information.get("ip");
                                     HiBANetwork.brokerInformation.put("nodeName", nodeName);
@@ -108,7 +108,8 @@ public class MulticastReceiver implements Runnable {
                                 if (information.get("mode").equals("init")) {
                                     MulticastPublisher.sendMulticast(MulticastController.brokerBeacon());
                                 } else if (information.get("mode").equals("brokerBroadcast")
-                                        && !HiBANetwork.blackList.containsKey((String) information.get("nodeName"))) {
+                                        && !HiBANetwork.isBlacklisted((String) information.get("nodeName"))) {
+                                    // 黑名單最多 1 分鐘：之後一定會和另一個 broker 比較、決定誰讓位
                                     MulticastController.handleOtherBroker(information);
                                 }
                                 break;

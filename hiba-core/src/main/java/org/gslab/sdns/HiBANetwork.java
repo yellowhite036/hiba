@@ -138,7 +138,31 @@ public class HiBANetwork implements SdnNetwork {
     private MulticastBrokerSelector multicastBrokerSelector = null;
     public static final Map<String, Object> mulitcastMap = new HashMap<>();
     public static final Map<String, Object> brokerInformation = new HashMap<>();
-    public static final Map<String, String> blackList = new HashMap<>();
+    /**
+     * 連不上的 broker：nodeName → 列入時間（毫秒）。
+     * 列入後 {@link #BLACKLIST_TTL_MS} 自動失效，不論本機是什麼模式；
+     * 原本只在選舉中（init）才會清除，本機當上 broker 後就永遠不清，
+     * 導致它一直忽略另一個 broker 的廣播、不讓位，同網段長期存在兩個 broker。
+     */
+    public static final Map<String, Long> blackList = new ConcurrentHashMap<>();
+
+    public static final long BLACKLIST_TTL_MS = 60_000;
+
+    /** 這個 broker 是否在黑名單中（過期的記錄順便移除） */
+    public static boolean isBlacklisted(String nodeName) {
+        if (nodeName == null) {
+            return false;
+        }
+        Long addedAt = blackList.get(nodeName);
+        if (addedAt == null) {
+            return false;
+        }
+        if (System.currentTimeMillis() - addedAt >= BLACKLIST_TTL_MS) {
+            blackList.remove(nodeName, addedAt);
+            return false;
+        }
+        return true;
+    }
     public static String MULTICAST_INTERFACE;
     public static String LOCAL_IP;
     public static String BROKER_IP;
@@ -1355,7 +1379,7 @@ public class HiBANetwork implements SdnNetwork {
                                 String UnableConnectBroker = (String) brokerInformation.get("nodeName");
                                 if (!brokerInformation.get("ip").equals(HiBAInitial.accountingServer)) {
                                     logger.atInfo().log("{} add to block list.", UnableConnectBroker);
-                                    blackList.put(UnableConnectBroker, (String) brokerInformation.get("ip"));
+                                    blackList.put(UnableConnectBroker, System.currentTimeMillis());
                                 }
                                 clientIdleCount = 0;
                                 brokerInformation.clear();
@@ -1441,6 +1465,7 @@ public class HiBANetwork implements SdnNetwork {
                     .log("Another broker {} ({}) wins, local broker steps down and rejoins.",
                             winner.getKey(), winner.getValue());
             MulticastController.startMulticastTime = 0;
+            blackList.remove(winner.getKey()); // 主動讓位給它：重新選舉時要能接受它的廣播
             MulticastController.setMode("init"); // 先改模式，之後關連線觸發的事件就不會再當成 broker 處理
             sameTierNodes.clear();
             sameTierNodesCheck.clear();
