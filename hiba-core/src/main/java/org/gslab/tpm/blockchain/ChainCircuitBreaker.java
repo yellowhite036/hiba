@@ -32,6 +32,7 @@ public final class ChainCircuitBreaker {
     /** 開啟後時間到，是否已有一個試探查詢在進行 */
     private final AtomicBoolean probing = new AtomicBoolean(false);
     private volatile String lastError = null;
+    private volatile Runnable onRecovered = () -> {};
 
     public ChainCircuitBreaker() {
         this(DEFAULT_OPEN_MILLIS, System::currentTimeMillis);
@@ -40,6 +41,11 @@ public final class ChainCircuitBreaker {
     ChainCircuitBreaker(long openMillis, LongSupplier clock) {
         this.openMillis = openMillis;
         this.clock = clock;
+    }
+
+    /** 斷路器從開啟回到關閉（鏈恢復）時要做的事 */
+    public void onRecovered(Runnable action) {
+        this.onRecovered = action == null ? () -> {} : action;
     }
 
     /** 這次查詢可以送出嗎（false＝鏈暫時無法使用，請直接走備援） */
@@ -56,12 +62,18 @@ public final class ChainCircuitBreaker {
 
     /** 查詢成功（包含合約回傳「未註冊」等正常結果） */
     public void recordSuccess() {
-        if (openUntil != 0) {
-            log.info("[Blockchain] RPC reachable again, resuming blockchain queries");
-        }
+        boolean wasOpen = openUntil != 0;
         openUntil = 0;
         lastError = null;
         probing.set(false);
+        if (wasOpen) {
+            log.info("[Blockchain] RPC reachable again, resuming blockchain queries");
+            try {
+                onRecovered.run();
+            } catch (RuntimeException e) {
+                log.warn("[Blockchain] Recovery action failed: {}", e.getMessage());
+            }
+        }
     }
 
     /**

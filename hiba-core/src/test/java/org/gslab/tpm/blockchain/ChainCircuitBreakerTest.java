@@ -79,6 +79,19 @@ class ChainCircuitBreakerTest {
     }
 
     @Test
+    void recoveryActionRunsOnlyWhenReopenedBreakerCloses() {
+        AtomicLong recovered = new AtomicLong();
+        breaker.onRecovered(recovered::incrementAndGet);
+        breaker.recordSuccess();
+        assertThat(recovered.get()).isZero(); // 本來就正常，不算恢復
+
+        breaker.recordFailure(new IOException("down"));
+        breaker.recordSuccess();
+        breaker.recordSuccess();
+        assertThat(recovered.get()).isEqualTo(1);
+    }
+
+    @Test
     void wrappedIoExceptionCountsAsConnectionFailure() {
         Exception wrapped = new RuntimeException("call failed", new IOException("Connection refused"));
         assertThat(ChainCircuitBreaker.isConnectionFailure(wrapped)).isTrue();

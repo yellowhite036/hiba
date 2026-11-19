@@ -10,7 +10,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import lombok.extern.slf4j.Slf4j;
 import org.gslab.tpm.PublicKeyCacheService;
 import org.gslab.tpm.blockchain.contract.TPMDeviceRegistry;
@@ -70,6 +72,8 @@ public class Web3BlockchainService implements AutoCloseable {
     private final PublicKeyCacheService cacheService;
     /** RPC 連不上時暫停查詢，避免每次查詢都卡在連線逾時（見 {@link ChainCircuitBreaker}） */
     private final ChainCircuitBreaker breaker = new ChainCircuitBreaker();
+    /** 這次鏈離線期間已經記錄過「改用最後已知公鑰」的設備（避免每則訊息都寫 log） */
+    private final Set<String> lastKnownNotified = ConcurrentHashMap.newKeySet();
 
     // 事件訂閱
     private Disposable deviceRegisteredSubscription;
@@ -84,6 +88,13 @@ public class Web3BlockchainService implements AutoCloseable {
         this.web3j = web3j;
         this.contract = contract;
         this.cacheService = cacheService;
+        // 鏈恢復：一般快取全部重新查詢一次（離線期間可能有設備被撤銷），最後已知公鑰保留
+        breaker.onRecovered(() -> {
+            lastKnownNotified.clear();
+            if (cacheService != null) {
+                cacheService.expireAllFresh();
+            }
+        });
         log.debug("Web3 blockchain service initialized");
         log.debug("   Contract address: {}", contract.getContractAddress());
 
@@ -329,10 +340,26 @@ public class Web3BlockchainService implements AutoCloseable {
 
         // 快取未命中，從區塊鏈查詢並更新快取
         Optional<PublicKey> publicKey = getPublicKey(ekFingerprint);
-        if (cacheService != null) {
-            publicKey.ifPresent(key -> cacheService.put(ekFingerprint, key));
+        if (cacheService == null) {
+            return publicKey;
         }
-        return publicKey;
+        if (publicKey.isPresent()) {
+            cacheService.put(ekFingerprint, publicKey.get());
+            return publicKey;
+        }
+        if (isChainAvailable()) {
+            // 鏈是通的、但查不到：設備沒註冊或已撤銷，最後已知公鑰也不能再用
+            cacheService.invalidate(ekFingerprint);
+            return publicKey;
+        }
+        // 鏈連不上：沿用最後一次從鏈上驗證過的公鑰（最多 24 小時）
+        Optional<PublicKey> lastKnown = cacheService.getLastKnown(ekFingerprint);
+        if (lastKnown.isPresent() && lastKnownNotified.add(ekFingerprint)) {
+            log.info(
+                    "[Blockchain] RPC unreachable, using last verified public key for {}...",
+                    truncate(ekFingerprint, 16));
+        }
+        return lastKnown;
     }
 
     /**
