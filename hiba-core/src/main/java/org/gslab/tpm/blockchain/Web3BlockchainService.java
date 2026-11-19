@@ -20,7 +20,6 @@ import org.web3j.crypto.Credentials;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.DefaultBlockParameterName;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
-import org.web3j.protocol.http.HttpService;
 import org.web3j.tx.RawTransactionManager;
 import org.web3j.tx.TransactionManager;
 import org.web3j.tx.gas.ContractGasProvider;
@@ -172,7 +171,7 @@ public class Web3BlockchainService implements AutoCloseable {
                 throw new IllegalArgumentException("Private key is required");
             }
 
-            Web3j web3j = Web3j.build(new HttpService(rpcUrl));
+            Web3j web3j = Web3j.build(RpcHttp.service(rpcUrl));
             Credentials credentials = Credentials.create(privateKey);
             ContractGasProvider gasProvider = new StaticGasProvider(gasPrice, gasLimit);
             TransactionManager txManager = new RawTransactionManager(

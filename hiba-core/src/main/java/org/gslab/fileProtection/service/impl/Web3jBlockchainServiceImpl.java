@@ -15,11 +15,11 @@ import org.gslab.fileProtection.exception.FileNotFoundException;
 import org.gslab.fileProtection.model.FileMetadata;
 import org.gslab.fileProtection.model.TransactionResult;
 import org.gslab.fileProtection.service.BlockchainService;
+import org.gslab.tpm.blockchain.RpcHttp;
 import org.web3j.crypto.Credentials;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.methods.response.Transaction;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
-import org.web3j.protocol.http.HttpService;
 import org.web3j.protocol.websocket.WebSocketService;
 import org.web3j.tx.TransactionManager;
 import org.web3j.tx.exceptions.ContractCallException;
@@ -75,7 +75,7 @@ public class Web3jBlockchainServiceImpl implements BlockchainService {
         } else if (rpcUrl.startsWith("http")) {
             log.info("Using HTTP RPC URL for blockchain connection");
             this.webSocketService = null; // No WebSocket service for HTTP
-            this.web3j = Web3j.build(new HttpService(rpcUrl));
+            this.web3j = Web3j.build(RpcHttp.service(rpcUrl));
         } else {
             throw new IllegalArgumentException("Unsupported RPC URL scheme. Use http(s):// or ws(s)://");
         }

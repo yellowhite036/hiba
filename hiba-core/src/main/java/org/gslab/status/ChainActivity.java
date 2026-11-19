@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import org.gslab.tpm.blockchain.RpcHttp;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.slf4j.Logger;
@@ -45,7 +46,6 @@ import org.web3j.protocol.core.methods.response.EthCall;
 import org.web3j.protocol.core.methods.response.EthLog;
 import org.web3j.protocol.core.methods.response.Log;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
-import org.web3j.protocol.http.HttpService;
 
 /**
  * 區塊鏈動作紀錄（GET /api/chain，網頁 /chain）：accounting server 每 10 秒向鏈查詢
@@ -187,7 +187,7 @@ public final class ChainActivity {
             error = "讀取 env.json 失敗：" + e.getMessage();
         }
         if (!rpcUrl.isBlank()) {
-            web3j = Web3j.build(new HttpService(rpcUrl));
+            web3j = Web3j.build(RpcHttp.service(rpcUrl));
         } else if (error.equals("尚未讀取")) {
             error = "env.json 沒有設定 Blockchain.rpcURL";
         }
