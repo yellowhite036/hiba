@@ -433,9 +433,7 @@ public class TPMDeviceRegistryConfig {
         if (contractAddress == null || contractAddress.isEmpty()) {
             throw new IllegalStateException("Contract address is required");
         }
-        if (privateKey == null || privateKey.isEmpty()) {
-            throw new IllegalStateException("Private key is required");
-        }
+        // privateKey 可以留空：Web3BlockchainService 會以唯讀模式運作（只查詢，不送交易）
         if (!contractAddress.startsWith("0x") || contractAddress.length() != 42) {
             throw new IllegalStateException("Invalid contract address format");
         }

@@ -9,7 +9,8 @@
 # 每台節點會定期用 TPM 簽「我的錢包是 0x…」送給 accounting server（GET /api/wallets 列出）。
 # 這個腳本不信任 accounting server：每一份聲明都用鏈上登記的該設備公鑰重新驗章，
 # 驗章失敗、設備未註冊或已撤銷、錢包已屬於別台的都會跳過。
-# 合約位址、RPC、管理員私鑰讀自本機 env.json（和 register_node.sh 相同，可用 ENV_JSON=路徑 覆蓋）。
+# 合約位址、RPC 讀自本機 env.json，管理員私鑰讀自 /home/user/.hiba_admin.key（和 register_node.sh 相同，
+# 可用 ENV_JSON=路徑、ADMIN_KEY_FILE=路徑 覆蓋）。
 set -uo pipefail
 
 ENV_JSON="${ENV_JSON:-/home/user/HiBA/env.json}"
@@ -26,7 +27,7 @@ while [ $# -gt 0 ]; do
         --from) FROM="$2"; shift 2 ;;
         --dry-run) DRY=1; shift ;;
         --yes|-y) YES=1; shift ;;
-        -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
         *) fail "不認得的選項: $1" ;;
     esac
 done
@@ -42,14 +43,32 @@ for c in "$(command -v cast 2>/dev/null)" "$HOME/.foundry/bin/cast" /home/soc/.f
 done
 [ -n "$CAST" ] || fail "找不到 cast（Foundry）"
 
-read -r RPC REGISTRY KEY GAS_PRICE FILE_CONTRACT < <(python3 -c '
+read -r RPC REGISTRY ENV_KEY GAS_PRICE FILE_CONTRACT < <(python3 -c '
 import json, sys
 d = json.load(open(sys.argv[1]))
-k = d["BlockchainTPMRegistry"]["privateKey"]
-print(d["Blockchain"]["rpcURL"], d["BlockchainTPMRegistry"]["contractAddress"], k if k.startswith("0x") else "0x" + k,
+k = d["BlockchainTPMRegistry"].get("privateKey") or "-"
+print(d["Blockchain"]["rpcURL"], d["BlockchainTPMRegistry"]["contractAddress"], k,
       d["Blockchain"].get("gasPrice", "-"), d.get("BlockchainFileProtect", {}).get("contractAddress") or "-")' "$ENV_JSON") \
     || fail "無法從 $ENV_JSON 讀取區塊鏈設定"
 [ "$FILE_CONTRACT" != - ] || fail "$ENV_JSON 沒有 BlockchainFileProtect.contractAddress"
+# 管理員私鑰：放在 ADMIN_KEY_FILE（預設 /home/user/.hiba_admin.key，chmod 600），不放在 HiBA 的 env.json。
+# HiBA 執行時不需要管理權；找不到這個檔案時才退回 env.json 的 BlockchainTPMRegistry.privateKey（舊做法）。
+ADMIN_KEY_FILE="${ADMIN_KEY_FILE:-/home/user/.hiba_admin.key}"
+if [ -r "$ADMIN_KEY_FILE" ]; then
+    KEY="$(tr -d ' \r\n' < "$ADMIN_KEY_FILE")"
+elif [ "$ENV_KEY" != - ]; then
+    KEY="$ENV_KEY"
+    echo "  ⚠ 管理員私鑰還放在 $ENV_JSON：建議執行 sudo bash /home/user/hiba_dist/move_admin_key.sh 移出"
+else
+    fail "找不到管理員私鑰：請放在 $ADMIN_KEY_FILE（chmod 600），或用 ADMIN_KEY_FILE=路徑 指定"
+fi
+[[ "$KEY" == 0x* ]] || KEY="0x$KEY"
+ADMIN_ADDR="$("$CAST" wallet address --private-key "$KEY" 2>/dev/null)" || fail "管理員私鑰格式不對"
+IS_ADMIN="$("$CAST" call "$REGISTRY" "admins(address)(bool)" "$ADMIN_ADDR" --rpc-url "$RPC" 2>/dev/null)"
+OWNER="$("$CAST" call "$REGISTRY" "owner()(address)" --rpc-url "$RPC" 2>/dev/null)"
+[ "$IS_ADMIN" = true ] || [ "$(echo "$OWNER" | tr A-F a-f)" = "$(echo "$ADMIN_ADDR" | tr A-F a-f)" ] \
+    || fail "$ADMIN_ADDR 不是 TPMDeviceRegistry 的管理員（或區塊鏈 $RPC 連不上）"
+echo "  管理員 $ADMIN_ADDR"
 FEE_OPTS=()
 [ "$GAS_PRICE" = 0 ] && FEE_OPTS=(--legacy --gas-price 0)
 

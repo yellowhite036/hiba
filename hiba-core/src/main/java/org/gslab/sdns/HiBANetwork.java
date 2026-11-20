@@ -222,6 +222,7 @@ public class HiBANetwork implements SdnNetwork {
                 .privateKey(tpmDeviceRegistryConfig.getPrivateKey())
                 .cacheService(new PublicKeyCacheService(Path.of(LastKnownKeyStore.DEFAULT_FILE)))
                 .build();
+        tpmDeviceRegistryService.warnIfAdminKeyAsync();
 
         clientBootstrap = new Bootstrap()
                 .group(clientWorker)
@@ -312,6 +313,7 @@ public class HiBANetwork implements SdnNetwork {
                 .privateKey(tpmDeviceRegistryConfig.getPrivateKey())
                 .cacheService(new PublicKeyCacheService(Path.of(LastKnownKeyStore.DEFAULT_FILE)))
                 .build();
+        tpmDeviceRegistryService.warnIfAdminKeyAsync();
 
         // 節點狀態頁（/nodes、/api/nodes）只在 accounting server 上啟用
         NodeStatusRegistry.get().enable(HiBAInitial.nodeName, tpmDeviceRegistryService);

@@ -39,7 +39,7 @@ Hyperledger Besu 私有鏈上（QBFT 共識、零手續費、資料存在硬碟�
 
 | 帳號 | 權限 | 放在 |
 |---|---|---|
-| 管理員（`admin.key`） | 登記、更新公鑰、撤銷設備、管理管理員 | 只放在 Pi 的 `~/HiBA/env.json`，另外離線備份 |
+| 管理員（`admin.key`） | 登記、更新公鑰、撤銷設備、管理管理員 | 放在 Pi 的 `/home/user/.hiba_admin.key`（root、600，**不放進 env.json**：HiBA 執行時不需要管理權），另外離線備份 |
 | 設備錢包（各節點 `~/HiBA/device_wallet.key`） | 綁定到該設備 EK 後才能登記檔案；設備被撤銷就失效 | 各節點自己產生，不離開那台 |
 | 舊的共用上傳帳號（`uploader.key`） | 新版檔案合約不再接受它上鏈，只剩讀鏈 | 節點範本 env.json（相容用） |
 | Besu 驗證節點金鑰（`~/besu/node*/key`） | 參與出塊 | 只放在鏈主機 |

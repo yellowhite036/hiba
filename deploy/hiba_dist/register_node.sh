@@ -7,7 +7,8 @@
 # 有給設備錢包位址（節點的 ~/HiBA/device_wallet.key；在節點上用
 #   java -cp hiba-core-0.0.1.jar org.gslab.util.DeviceWallet ~/HiBA 取得位址）時，再到 FileProtectionContract
 # 把錢包綁定到這個 EK（bindDeviceWallet）。綁定後這台才能把檔案登記上鏈，鏈上紀錄也會寫出它的 EK。
-# 合約地址、RPC、私鑰讀自 accounting server 的 env.json（可用 ENV_JSON=路徑 覆蓋）。
+# 合約地址、RPC 讀自 accounting server 的 env.json（可用 ENV_JSON=路徑 覆蓋）；
+# 管理員私鑰讀自 /home/user/.hiba_admin.key（可用 ADMIN_KEY_FILE=路徑 覆蓋）。
 set -uo pipefail
 
 ENV_JSON="${ENV_JSON:-/home/user/HiBA/env.json}"
@@ -29,14 +30,32 @@ for c in "$(command -v cast 2>/dev/null)" "$HOME/.foundry/bin/cast" /home/soc/.f
 done
 [ -n "$CAST" ] || fail "找不到 cast（Foundry）。soc 帳號裝過：請用 sudo 執行，或安裝 Foundry"
 
-read -r RPC CONTRACT KEY GAS_PRICE FILE_CONTRACT < <(python3 -c '
+read -r RPC CONTRACT ENV_KEY GAS_PRICE FILE_CONTRACT < <(python3 -c '
 import json, sys
 d = json.load(open(sys.argv[1]))
-k = d["BlockchainTPMRegistry"]["privateKey"]
-print(d["Blockchain"]["rpcURL"], d["BlockchainTPMRegistry"]["contractAddress"], k if k.startswith("0x") else "0x" + k,
+k = d["BlockchainTPMRegistry"].get("privateKey") or "-"
+print(d["Blockchain"]["rpcURL"], d["BlockchainTPMRegistry"]["contractAddress"], k,
       d["Blockchain"].get("gasPrice", "-"), d.get("BlockchainFileProtect", {}).get("contractAddress") or "-")' "$ENV_JSON") \
     || fail "無法從 $ENV_JSON 讀取 Blockchain / BlockchainTPMRegistry 設定"
 
+# 管理員私鑰：放在 ADMIN_KEY_FILE（預設 /home/user/.hiba_admin.key，chmod 600），不放在 HiBA 的 env.json。
+# HiBA 執行時不需要管理權；找不到這個檔案時才退回 env.json 的 BlockchainTPMRegistry.privateKey（舊做法）。
+ADMIN_KEY_FILE="${ADMIN_KEY_FILE:-/home/user/.hiba_admin.key}"
+if [ -r "$ADMIN_KEY_FILE" ]; then
+    KEY="$(tr -d ' \r\n' < "$ADMIN_KEY_FILE")"
+elif [ "$ENV_KEY" != - ]; then
+    KEY="$ENV_KEY"
+    echo "  ⚠ 管理員私鑰還放在 $ENV_JSON：建議執行 sudo bash /home/user/hiba_dist/move_admin_key.sh 移出"
+else
+    fail "找不到管理員私鑰：請放在 $ADMIN_KEY_FILE（chmod 600），或用 ADMIN_KEY_FILE=路徑 指定"
+fi
+[[ "$KEY" == 0x* ]] || KEY="0x$KEY"
+ADMIN_ADDR="$("$CAST" wallet address --private-key "$KEY" 2>/dev/null)" || fail "管理員私鑰格式不對"
+IS_ADMIN="$("$CAST" call "$CONTRACT" "admins(address)(bool)" "$ADMIN_ADDR" --rpc-url "$RPC" 2>/dev/null)"
+OWNER="$("$CAST" call "$CONTRACT" "owner()(address)" --rpc-url "$RPC" 2>/dev/null)"
+[ "$IS_ADMIN" = true ] || [ "$(echo "$OWNER" | tr A-F a-f)" = "$(echo "$ADMIN_ADDR" | tr A-F a-f)" ] \
+    || fail "$ADMIN_ADDR 不是 TPMDeviceRegistry 的管理員（或區塊鏈 $RPC 連不上）"
+echo "  管理員 $ADMIN_ADDR"
 # 零手續費的私有鏈（Besu，gasPrice=0）：送 gasPrice 0 的舊式交易，帳號不需要有餘額
 FEE_OPTS=()
 [ "$GAS_PRICE" = 0 ] && FEE_OPTS=(--legacy --gas-price 0)

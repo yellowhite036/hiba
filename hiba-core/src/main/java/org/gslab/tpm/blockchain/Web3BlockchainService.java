@@ -20,7 +20,17 @@ import org.web3j.crypto.Credentials;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.DefaultBlockParameterName;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
+import org.web3j.abi.FunctionEncoder;
+import org.web3j.abi.FunctionReturnDecoder;
+import org.web3j.abi.TypeReference;
+import org.web3j.abi.datatypes.Address;
+import org.web3j.abi.datatypes.Bool;
+import org.web3j.abi.datatypes.Function;
+import org.web3j.abi.datatypes.Type;
+import org.web3j.protocol.core.methods.request.Transaction;
+import org.web3j.protocol.core.methods.response.EthCall;
 import org.web3j.tx.RawTransactionManager;
+import org.web3j.tx.ReadonlyTransactionManager;
 import org.web3j.tx.TransactionManager;
 import org.web3j.tx.gas.ContractGasProvider;
 import org.web3j.tx.gas.StaticGasProvider;
@@ -69,6 +79,10 @@ public class Web3BlockchainService implements AutoCloseable {
     private final Web3j web3j;
     private final TPMDeviceRegistry contract;
     private final PublicKeyCacheService cacheService;
+    /** 送交易用的帳號位址；唯讀模式（沒有設定私鑰）為 null */
+    private final String senderAddress;
+
+    private static final String ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
     /** RPC 連不上時暫停查詢，避免每次查詢都卡在連線逾時（見 {@link ChainCircuitBreaker}） */
     private final ChainCircuitBreaker breaker = new ChainCircuitBreaker();
     /** 這次鏈離線期間已經記錄過「改用最後已知公鑰」的設備（避免每則訊息都寫 log） */
@@ -83,10 +97,12 @@ public class Web3BlockchainService implements AutoCloseable {
 
     // ============ 建構函數 ============
 
-    private Web3BlockchainService(Web3j web3j, TPMDeviceRegistry contract, PublicKeyCacheService cacheService) {
+    private Web3BlockchainService(
+            Web3j web3j, TPMDeviceRegistry contract, PublicKeyCacheService cacheService, String senderAddress) {
         this.web3j = web3j;
         this.contract = contract;
         this.cacheService = cacheService;
+        this.senderAddress = senderAddress;
         // 鏈恢復：一般快取全部重新查詢一次（離線期間可能有設備被撤銷），最後已知公鑰保留
         breaker.onRecovered(() -> {
             lastKnownNotified.clear();
@@ -169,19 +185,25 @@ public class Web3BlockchainService implements AutoCloseable {
             if (contractAddress == null || contractAddress.isEmpty()) {
                 throw new IllegalArgumentException("Contract address is required");
             }
-            if (privateKey == null || privateKey.isEmpty()) {
-                throw new IllegalArgumentException("Private key is required");
-            }
-
             Web3j web3j = Web3j.build(RpcHttp.service(rpcUrl));
-            Credentials credentials = Credentials.create(privateKey);
             ContractGasProvider gasProvider = new StaticGasProvider(gasPrice, gasLimit);
-            TransactionManager txManager = new RawTransactionManager(
-                    web3j, credentials, Long.parseLong(networkId), pollingAttempts, pollingInterval);
+            TransactionManager txManager;
+            String sender;
+            if (privateKey == null || privateKey.isBlank()) {
+                // 沒有私鑰：唯讀模式。HiBA 執行時只需要查公鑰／狀態，登記、撤銷由管理者另外用 admin key 執行
+                txManager = new ReadonlyTransactionManager(web3j, ZERO_ADDRESS);
+                sender = null;
+                log.info("[Blockchain] TPM device registry in read-only mode (no privateKey configured)");
+            } else {
+                Credentials credentials = Credentials.create(privateKey.trim());
+                txManager = new RawTransactionManager(
+                        web3j, credentials, Long.parseLong(networkId), pollingAttempts, pollingInterval);
+                sender = credentials.getAddress();
+            }
 
             TPMDeviceRegistry contract = TPMDeviceRegistry.load(contractAddress, web3j, txManager, gasProvider);
 
-            return new Web3BlockchainService(web3j, contract, cacheService);
+            return new Web3BlockchainService(web3j, contract, cacheService, sender);
         }
     }
 
@@ -757,6 +779,76 @@ public class Web3BlockchainService implements AutoCloseable {
      */
     public String getContractAddress() {
         return contract.getContractAddress();
+    }
+
+    /** 送交易用的帳號位址；唯讀模式（沒有設定私鑰）時為 empty */
+    public Optional<String> getSenderAddress() {
+        return Optional.ofNullable(senderAddress);
+    }
+
+    /**
+     * 查詢某位址在 TPMDeviceRegistry 是否有管理權（owner 或 admins[address]）。
+     *
+     * @return true／false；鏈連不上或查詢失敗時為 empty
+     */
+    public Optional<Boolean> isRegistryAdmin(String address) {
+        if (address == null || breaker.isOpen()) {
+            return Optional.empty();
+        }
+        try {
+            String owner = contract.owner().send();
+            if (owner != null && owner.equalsIgnoreCase(address)) {
+                return Optional.of(true);
+            }
+            Function fn = new Function(
+                    "admins", List.<Type>of(new Address(address)), List.<TypeReference<?>>of(new TypeReference<Bool>() {}));
+            EthCall resp = web3j.ethCall(
+                            Transaction.createEthCallTransaction(ZERO_ADDRESS, getContractAddress(), FunctionEncoder.encode(fn)),
+                            DefaultBlockParameterName.LATEST)
+                    .send();
+            if (resp.hasError()) {
+                log.debug("[Blockchain] admins() query failed: {}", resp.getError().getMessage());
+                return Optional.empty();
+            }
+            @SuppressWarnings("rawtypes")
+            List<Type> out = FunctionReturnDecoder.decode(resp.getValue(), fn.getOutputParameters());
+            return out.isEmpty() ? Optional.empty() : Optional.of((Boolean) out.get(0).getValue());
+        } catch (Exception e) {
+            log.debug("[Blockchain] admin check failed: {}", e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * 背景檢查：設定的私鑰若是鏈上管理員就發出警告（HiBA 執行時不需要管理權，放在節點上等於誰拿到這台就能登記／撤銷設備）。
+     * 鏈連不上時每 30 秒重試，最多 20 次；不會影響啟動。
+     */
+    public void warnIfAdminKeyAsync() {
+        if (senderAddress == null) {
+            return;
+        }
+        Thread t = new Thread(() -> {
+            for (int i = 0; i < 20; i++) {
+                Optional<Boolean> admin = isRegistryAdmin(senderAddress);
+                if (admin.isPresent()) {
+                    if (admin.get()) {
+                        log.warn("[Security] BlockchainTPMRegistry.privateKey ({}) is a registry ADMIN. HiBA only needs "
+                                + "read access: set it to \"\" in env.json and keep the admin key off this machine "
+                                + "(see deploy/hiba_dist/move_admin_key.sh)", senderAddress);
+                    } else {
+                        log.info("[Blockchain] Registry account {} has no admin rights (OK)", senderAddress);
+                    }
+                    return;
+                }
+                try {
+                    Thread.sleep(30_000);
+                } catch (InterruptedException e) {
+                    return;
+                }
+            }
+        }, "registry-admin-check");
+        t.setDaemon(true);
+        t.start();
     }
 
     /**

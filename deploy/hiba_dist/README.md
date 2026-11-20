@@ -10,6 +10,7 @@ jar 和設定範本不進 git：
 | `hiba_autoupdate.sh` | ✔ | 由 `setup_node.sh` 安裝成 `/usr/local/sbin/hiba-autoupdate`，每 2 分鐘向 accounting server 比對 jar 版本 |
 | `register_node.sh` | ✔ | 在 accounting server 上把節點的 TPM 註冊到 TPMDeviceRegistry，第三個參數給錢包位址時一併綁定設備錢包（`install_node.sh` 透過 ssh 呼叫） |
 | `bind_wallets.sh` | ✔ | 在有管理員私鑰的 Pi 上執行：讀各節點 TPM 簽過的錢包聲明（`/api/wallets`），用鏈上公鑰驗章後一次綁定所有節點的設備錢包 |
+| `move_admin_key.sh` | ✔ | 在 Pi 上執行一次：把管理員私鑰從 `~/HiBA/env.json` 移到 `/home/user/.hiba_admin.key`（root、600），HiBA 改以唯讀模式連鏈；`register_node.sh`、`bind_wallets.sh` 改讀這個檔案 |
 | `hiba-core-0.0.1.jar` | ✘ | 編譯產物，由 Pi 編譯後複製進 `~/hiba_dist` |
 | `template/` | ✘ | 新節點的 env.json 等設定範本，**含區塊鏈私鑰**，只放在 Pi 上 |
 
