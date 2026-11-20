@@ -13,6 +13,7 @@
 #   - jar 裡附帶的新版 hiba_autoupdate.sh 和這支不同 → 換成新版（下次執行生效）
 #   - hiba.service 還是 Restart=on-failure → 改成 Restart=always
 #   - 軟體 TPM（swtpm-hiba）：調寬字典攻擊保護；被鎖定時自動解除
+#   - logs/*startup.log（java 主控台輸出）交給 logrotate 輪替
 # 另外會同步 accounting server 的檔案合約位址（換新合約時自動改 env.json 並重啟 HiBA）。
 # 所以節點只要 jar 是最新版，這些設定也會跟著更新，不用再手動執行 install_node.sh / setup_node.sh。
 #
@@ -208,6 +209,23 @@ maintain() {
             touch "$TPM_DA_MARK"
             own "$TPM_DA_MARK"
             log "軟體 TPM 的字典攻擊保護已調寬（失敗 1000 次才鎖定，每 60 秒恢復 1 次）"
+        fi
+    fi
+
+    # 4. logs/*startup.log 是 java 的主控台輸出（hiba.service 用 StandardOutput=append: 寫入），
+    #    log4j2 不會輪替它，會一直長大：交給 logrotate（copytruncate：systemd 一直開著這個檔）
+    if command -v logrotate >/dev/null 2>&1; then
+        local rot="/etc/logrotate.d/hiba-$HIBA_USER" want_rot
+        want_rot="$(printf '# HiBA 主控台輸出（hiba-autoupdate 產生）\n%s/logs/*startup.log {\n    su %s %s\n    daily\n    maxsize 10M\n    rotate 5\n    compress\n    missingok\n    notifempty\n    copytruncate\n}\n' \
+            "$DIR" "$HIBA_USER" "$(id -gn "$HIBA_USER")")"
+        if [ "$(cat "$rot" 2>/dev/null)" != "$want_rot" ]; then
+            printf '%s\n' "$want_rot" > "$rot" && chmod 644 "$rot"
+            if logrotate -d "$rot" >/dev/null 2>&1; then
+                log "已設定 logrotate 輪替 $DIR/logs/*startup.log（超過 10MB 就輪替，保留 5 份）"
+            else
+                rm -f "$rot"
+                log "logrotate 設定檢查失敗，沒有啟用 startup.log 輪替"
+            fi
         fi
     fi
 }

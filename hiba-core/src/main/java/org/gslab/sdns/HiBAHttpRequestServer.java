@@ -42,6 +42,16 @@ public class HiBAHttpRequestServer implements Runnable {
             // Start temp file cleanup task
             cleanupTask.start();
 
+            // HttpObjectAggregator takes an int, so MAX_REQUEST_SIZE is capped at 2GB.
+            // Computed and logged once here; initChannel runs for every connection.
+            final long maxSize = FileUploadConfig.MAX_REQUEST_SIZE;
+            final int aggregatorSize = (int) Math.min(maxSize, Integer.MAX_VALUE);
+            if (maxSize > Integer.MAX_VALUE) {
+                logger.atWarn()
+                        .addKeyValue("maxSize", maxSize)
+                        .log("MAX_REQUEST_SIZE ({} bytes) exceeds Integer.MAX_VALUE, capping aggregator at 2GB", maxSize);
+            }
+
             httpServerBootstrap
                     .group(bossGroup, workerGroup)
                     .channel(NioServerSocketChannel.class)
@@ -52,21 +62,8 @@ public class HiBAHttpRequestServer implements Runnable {
                         protected void initChannel(SocketChannel ch) throws Exception {
                             ch.pipeline().addLast("codec", new HttpServerCodec());
 
-                            // Increase aggregator size to support larger requests (up to MAX_REQUEST_SIZE)
-                            // Note: HttpObjectAggregator takes int parameter, max value is Integer.MAX_VALUE (2GB)
+                            // Aggregator sized once above (up to MAX_REQUEST_SIZE, capped at 2GB).
                             // For file uploads > this size, they will spill to disk via HttpPostRequestDecoder
-                            long maxSize = FileUploadConfig.MAX_REQUEST_SIZE;
-                            int aggregatorSize = (int) Math.min(maxSize, Integer.MAX_VALUE);
-
-                            if (maxSize > Integer.MAX_VALUE) {
-                                logger.atWarn()
-                                        .addKeyValue("maxSize", maxSize)
-                                        .log(
-                                                "MAX_REQUEST_SIZE ({} bytes) exceeds Integer.MAX_VALUE, "
-                                                        + "capping aggregator at 2GB",
-                                                maxSize);
-                            }
-
                             ch.pipeline().addLast("aggregator", new HttpObjectAggregator(aggregatorSize));
                             ch.pipeline().addLast("handler", new HttpRequestHandler(app));
                         }
