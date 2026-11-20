@@ -10,6 +10,7 @@ import org.gslab.fileProtection.config.BlockchainServiceConfig;
 import org.gslab.fileProtection.config.DatabaseConfig;
 import org.gslab.fileProtection.config.FileProtectionConfig;
 import org.gslab.fileProtection.config.RetryConfig;
+import org.gslab.handlers.MessageTPMVerifyHandler.VerificationMode;
 import org.gslab.sdns.HiBAInitial;
 import org.json.JSONObject;
 import org.slf4j.Logger;
@@ -75,6 +76,17 @@ public class SystemConfigurationLoader {
         hibaNetworkConfig.setInterfaceIP(json.optString("interfaceAddress", ""));
         hibaNetworkConfig.setTpmSignatureVerification(json.optBoolean("tpmSignatureVerification", true));
         hibaNetworkConfig.setBlockchainFileProtect(json.optBoolean("BlockchainFileProtect", true));
+        hibaNetworkConfig.setRejectUnsignedMessages(json.optBoolean("rejectUnsignedMessages", true));
+
+        // 驗章公鑰來源：預設只接受鏈上已註冊、未撤銷設備的公鑰
+        String verificationMode = json.optString("tpmVerificationMode", VerificationMode.BLOCKCHAIN_STRICT.name());
+        try {
+            hibaNetworkConfig.setTpmVerificationMode(VerificationMode.valueOf(verificationMode.trim()));
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException(
+                    "System configuration error occurred. tpmVerificationMode must be one of "
+                            + java.util.Arrays.toString(VerificationMode.values()) + ", got: " + verificationMode);
+        }
 
         // Verify accounting server is false, then verify accounting server ip is not empty string
         if (!hibaNetworkConfig.isAccountingServer()

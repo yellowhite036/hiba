@@ -50,7 +50,6 @@ import org.gslab.configuration.SystemConfigurationLoader;
 import org.gslab.configuration.TPMDeviceRegistryConfig;
 import org.gslab.handlers.MessageTPMSignHandler;
 import org.gslab.handlers.MessageTPMVerifyHandler;
-import org.gslab.handlers.MessageTPMVerifyHandler.VerificationMode;
 import org.gslab.handlers.NonceValidator;
 import org.gslab.message_hiba.AccountingTestMessage;
 import org.gslab.message_hiba.AccountingTestResponse;
@@ -240,11 +239,12 @@ public class HiBANetwork implements SdnNetwork {
                                         .addLast(
                                                 "tpmVerify",
                                                 new MessageTPMVerifyHandler(
-                                                        VerificationMode.BLOCKCHAIN_PREFERRED,
+                                                        HiBAInitial.tpmVerificationMode,
                                                         tpmDeviceRegistryService,
                                                         MessageVerificationConfig.defaultConfig(),
                                                         NonceValidator.getInstance(),
-                                                        HiBAInitial.tpmSignatureVerification));
+                                                        HiBAInitial.tpmSignatureVerification,
+                                                        HiBAInitial.rejectUnsignedMessages));
                                 // TPM 簽章 Handler（將 Message 包裝成 SignedMessage）
                                 channel.pipeline()
                                         .addLast(
@@ -412,11 +412,12 @@ public class HiBANetwork implements SdnNetwork {
                                 .addLast(
                                         "tpmVerify",
                                         new MessageTPMVerifyHandler(
-                                                VerificationMode.BLOCKCHAIN_PREFERRED,
+                                                HiBAInitial.tpmVerificationMode,
                                                 tpmDeviceRegistryService,
                                                 MessageVerificationConfig.defaultConfig(),
                                                 NonceValidator.getInstance(),
-                                                HiBAInitial.tpmSignatureVerification));
+                                                HiBAInitial.tpmSignatureVerification,
+                                                HiBAInitial.rejectUnsignedMessages));
                         // TPM 簽章 Handler（將 Message 包裝成 SignedMessage）
                         channel.pipeline()
                                 .addLast(
@@ -727,11 +728,12 @@ public class HiBANetwork implements SdnNetwork {
                                 .addLast(
                                         "tpmVerify",
                                         new MessageTPMVerifyHandler(
-                                                VerificationMode.BLOCKCHAIN_PREFERRED,
+                                                HiBAInitial.tpmVerificationMode,
                                                 tpmDeviceRegistryService,
                                                 MessageVerificationConfig.defaultConfig(),
                                                 NonceValidator.getInstance(),
-                                                HiBAInitial.tpmSignatureVerification));
+                                                HiBAInitial.tpmSignatureVerification,
+                                                HiBAInitial.rejectUnsignedMessages));
                         // TPM 簽章 Handler（將 Message 包裝成 SignedMessage）
                         channel.pipeline()
                                 .addLast(
@@ -853,11 +855,12 @@ public class HiBANetwork implements SdnNetwork {
                                 .addLast(
                                         "tpmVerify",
                                         new MessageTPMVerifyHandler(
-                                                VerificationMode.BLOCKCHAIN_PREFERRED,
+                                                HiBAInitial.tpmVerificationMode,
                                                 tpmDeviceRegistryService,
                                                 MessageVerificationConfig.defaultConfig(),
                                                 NonceValidator.getInstance(),
-                                                HiBAInitial.tpmSignatureVerification));
+                                                HiBAInitial.tpmSignatureVerification,
+                                                HiBAInitial.rejectUnsignedMessages));
                         // TPM 簽章 Handler（將 Message 包裝成 SignedMessage）
                         channel.pipeline()
                                 .addLast(

@@ -95,6 +95,7 @@ public class MessageTPMVerifyHandler extends SimpleChannelInboundHandler<Message
     private final TimestampValidator timestampValidator;
     private final NonceValidator nonceValidator;
     private final boolean enabled;
+    private final boolean rejectUnsigned;
 
     /**
      * 建構 Handler（信任封包模式）
@@ -147,15 +148,36 @@ public class MessageTPMVerifyHandler extends SimpleChannelInboundHandler<Message
             MessageVerificationConfig config,
             NonceValidator nonceValidator,
             boolean enabled) {
+        this(mode, blockchainService, config, nonceValidator, enabled, false);
+    }
+
+    /**
+     * 建構 Handler（完整配置，含未簽章訊息的處理方式）
+     *
+     * @param mode              驗證模式
+     * @param blockchainService 區塊鏈服務
+     * @param config            驗證配置
+     * @param nonceValidator    Nonce 驗證器
+     * @param enabled           是否啟用
+     * @param rejectUnsigned    true：收到非 SignedMessage 就關閉連線；false：直接放行（舊行為）
+     */
+    public MessageTPMVerifyHandler(
+            VerificationMode mode,
+            Web3BlockchainService blockchainService,
+            MessageVerificationConfig config,
+            NonceValidator nonceValidator,
+            boolean enabled,
+            boolean rejectUnsigned) {
         this.mode = mode;
         this.blockchainService = blockchainService;
         this.config = config;
         this.timestampValidator = new TimestampValidator(config);
         this.nonceValidator = nonceValidator;
         this.enabled = enabled;
+        this.rejectUnsigned = rejectUnsigned;
 
         if (enabled) {
-            log.debug("Message TPM Verify Handler initialized, mode: {}", mode);
+            log.debug("Message TPM Verify Handler initialized, mode: {}, rejectUnsigned: {}", mode, rejectUnsigned);
             log.debug("   Timestamp validation: {}", config.isTimestampValidationEnabled() ? "enabled" : "disabled");
             log.debug("   Nonce validation: {}", config.isNonceValidationEnabled() ? "enabled" : "disabled");
         } else {
@@ -171,8 +193,18 @@ public class MessageTPMVerifyHandler extends SimpleChannelInboundHandler<Message
             return;
         }
 
-        // 如果不是 SignedMessage，直接傳遞（可能是未啟用簽章的舊版本）
+        // 不是 SignedMessage：rejectUnsigned 時拒絕，否則直接傳遞（相容未啟用簽章的舊版本）
         if (!(msg instanceof SignedMessage)) {
+            if (rejectUnsigned) {
+                log.warn(
+                        "Rejected unsigned Message: {} from {}",
+                        msg.getClass().getSimpleName(),
+                        ctx.channel().remoteAddress());
+                handleVerificationFailure(
+                        ctx,
+                        MessageVerificationResult.failure(MessageVerificationResult.ErrorCode.SIGNATURE_INVALID));
+                return;
+            }
             log.debug(
                     "Received unsigned Message: {}, passing through",
                     msg.getClass().getSimpleName());

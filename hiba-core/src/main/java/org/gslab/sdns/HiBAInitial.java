@@ -12,6 +12,7 @@ import org.gslab.util.CPUInfo;
 import org.gslab.util.JsonFileUtil;
 import org.gslab.util.ResourceCleanupManager;
 import org.gslab.configuration.HibaNetworkConfig;
+import org.gslab.handlers.MessageTPMVerifyHandler;
 import org.gslab.configuration.SystemConfigurationLoader;
 import org.gslab.fileProtection.BlockchainFileProtectManager;
 import org.gslab.fileProtection.config.BlockchainFileProtectManagerConfig;
@@ -55,6 +56,9 @@ public class HiBAInitial {
     public static String devicePerformanceEvaluation;
     public static boolean tpmSignatureVerification;
     public static boolean blockchainFileProtect;
+    public static MessageTPMVerifyHandler.VerificationMode tpmVerificationMode =
+            MessageTPMVerifyHandler.VerificationMode.BLOCKCHAIN_STRICT;
+    public static boolean rejectUnsignedMessages = true;
 
     // MobileNetwork environment content:
     public static boolean MobileControllerState;
@@ -135,6 +139,8 @@ public class HiBAInitial {
         devicePerformanceEvaluation = (String) hibaNetwork.get("devicePerformanceEvaluation");
         tpmSignatureVerification = Boolean.TRUE.equals(hibaNetworkConfig.getTpmSignatureVerification());
         blockchainFileProtect = Boolean.TRUE.equals(hibaNetworkConfig.getBlockchainFileProtect());
+        tpmVerificationMode = hibaNetworkConfig.getTpmVerificationMode();
+        rejectUnsignedMessages = Boolean.TRUE.equals(hibaNetworkConfig.getRejectUnsignedMessages());
 
         // MobileNetwork environment content:
         MobileControllerState = (Boolean) mobileNetwork.get("state");

@@ -1,5 +1,7 @@
 package org.gslab.configuration;
 
+import org.gslab.handlers.MessageTPMVerifyHandler.VerificationMode;
+
 public class HibaNetworkConfig {
 
     private Boolean isAccountingServer;
@@ -28,6 +30,8 @@ public class HibaNetworkConfig {
     private String interfaceIP; // interfaceAddress
     private Boolean tpmSignatureVerification;
     private Boolean blockchainFileProtect;
+    private VerificationMode tpmVerificationMode;
+    private Boolean rejectUnsignedMessages;
 
     public HibaNetworkConfig() {
         this.sysName = System.getProperty("user.name");
@@ -203,6 +207,22 @@ public class HibaNetworkConfig {
 
     public void setTpmSignatureVerification(Boolean tpmSignatureVerification) {
         this.tpmSignatureVerification = tpmSignatureVerification;
+    }
+
+    public VerificationMode getTpmVerificationMode() {
+        return tpmVerificationMode;
+    }
+
+    public void setTpmVerificationMode(VerificationMode tpmVerificationMode) {
+        this.tpmVerificationMode = tpmVerificationMode;
+    }
+
+    public Boolean getRejectUnsignedMessages() {
+        return rejectUnsignedMessages;
+    }
+
+    public void setRejectUnsignedMessages(Boolean rejectUnsignedMessages) {
+        this.rejectUnsignedMessages = rejectUnsignedMessages;
     }
 
     public Boolean getBlockchainFileProtect() {
