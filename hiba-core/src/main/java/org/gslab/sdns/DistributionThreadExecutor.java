@@ -13,6 +13,7 @@ import java.util.stream.Collectors;
 import org.gslab.Distributor;
 import org.gslab.Executor;
 import org.gslab.HiBAService;
+import org.gslab.authorization.AuthorizationService;
 import org.gslab.context.RequestContext;
 import org.gslab.context.RequestManager;
 import org.gslab.message_hiba.RequestFinishMessage;
@@ -348,6 +349,8 @@ public class DistributionThreadExecutor implements Runnable {
                                 .addKeyValue("taskMap", taskMap)
                                 .addKeyValue("requestName", requestName)
                                 .log("Sending TaskStartMessage to node");
+                        // M1：附上多個 Validator 簽署的授權憑證（mode=off 時不做事）
+                        AuthorizationService.get().attach(taskMap, nodeName, requestId, requestName, serviceName);
                         clientChannel.writeAndFlush(new TaskStartMessage(requestName, requestId, taskMap));
                     } else {
                         logger.atDebug()

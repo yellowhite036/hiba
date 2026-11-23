@@ -38,6 +38,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import org.gslab.App;
 import org.gslab.SdnNetwork;
+import org.gslab.authorization.AuthorizationService;
 import org.gslab.util.AESUtil;
 import org.gslab.util.CPUUsageRate;
 import org.gslab.util.JsonFileUtil;
@@ -223,6 +224,8 @@ public class HiBANetwork implements SdnNetwork {
                 .cacheService(new PublicKeyCacheService(Path.of(LastKnownKeyStore.DEFAULT_FILE)))
                 .build();
         tpmDeviceRegistryService.warnIfAdminKeyAsync();
+        // M1 多 Validator 授權（env.json Authorization.mode≠off 時才會啟用）
+        AuthorizationService.init(tpmDeviceRegistryService);
 
         clientBootstrap = new Bootstrap()
                 .group(clientWorker)

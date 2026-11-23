@@ -11,6 +11,8 @@ import org.gslab.Distributor;
 import org.gslab.Executor;
 import org.gslab.HiBAService;
 import org.gslab.SdnNetwork;
+import org.gslab.authorization.AuthorizationConfig;
+import org.gslab.authorization.AuthorizationService;
 import org.gslab.context.RequestContext;
 import org.gslab.context.RequestManager;
 import org.gslab.message_hiba.ResourceUpdateMessage;
@@ -176,11 +178,45 @@ public class ClientChannelHandlers {
                     .addKeyValue("taskInfo", msg.getTaskInformation())
                     .log("Received TaskStartMessage");
 
+            if (!checkAuthorization(msg)) {
+                return;
+            }
+
             if (network.getClients().isEmpty()) {
                 handleWorkerNode(ctx, msg);
             } else {
                 handleSubBrokerNode(ctx, msg);
             }
+        }
+
+        /**
+         * M1：執行前自行驗證多 Validator 授權憑證。mode=log 只記錄；mode=enforce 驗證不過就不執行。
+         *
+         * @return 是否繼續處理這個任務
+         */
+        private boolean checkAuthorization(TaskStartMessage msg) {
+            AuthorizationService auth = AuthorizationService.get();
+            if (!auth.isEnabled()) {
+                return true;
+            }
+            AuthorizationService.Verdict v = auth.verify(msg.getTaskInformation());
+            if (v.ok()) {
+                logger.atInfo()
+                        .addKeyValue("requestId", msg.getRequestId())
+                        .log("[Auth] Task authorized: " + v.validSignatures() + "/" + v.required()
+                                + " validator signatures, " + v.reason());
+                return true;
+            }
+            if (auth.mode() == AuthorizationConfig.Mode.ENFORCE) {
+                logger.atError()
+                        .addKeyValue("requestId", msg.getRequestId())
+                        .log("[Auth] Task REJECTED: " + v.reason());
+                return false;
+            }
+            logger.atWarn()
+                    .addKeyValue("requestId", msg.getRequestId())
+                    .log("[Auth] Task would be rejected (mode=log, still executing): " + v.reason());
+            return true;
         }
 
         private void handleWorkerNode(ChannelHandlerContext ctx, TaskStartMessage msg) {

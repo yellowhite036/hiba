@@ -820,6 +820,33 @@ public class Web3BlockchainService implements AutoCloseable {
     }
 
     /**
+     * 對任意合約做唯讀查詢（eth_call），共用這個服務的 RPC 連線與斷路器。
+     *
+     * @return 解碼後的回傳值；鏈連不上、斷路器開啟或查詢失敗時為 empty
+     */
+    @SuppressWarnings("rawtypes")
+    public Optional<List<Type>> callView(String contractAddress, Function fn) {
+        if (contractAddress == null || contractAddress.isBlank() || breaker.isOpen()) {
+            return Optional.empty();
+        }
+        try {
+            EthCall resp = web3j.ethCall(
+                            Transaction.createEthCallTransaction(ZERO_ADDRESS, contractAddress, FunctionEncoder.encode(fn)),
+                            DefaultBlockParameterName.LATEST)
+                    .send();
+            if (resp.hasError()) {
+                log.debug("[Blockchain] {}() query failed: {}", fn.getName(), resp.getError().getMessage());
+                return Optional.empty();
+            }
+            List<Type> out = FunctionReturnDecoder.decode(resp.getValue(), fn.getOutputParameters());
+            return out.isEmpty() ? Optional.empty() : Optional.of(out);
+        } catch (Exception e) {
+            log.debug("[Blockchain] {}() query failed: {}", fn.getName(), e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /**
      * 背景檢查：設定的私鑰若是鏈上管理員就發出警告（HiBA 執行時不需要管理權，放在節點上等於誰拿到這台就能登記／撤銷設備）。
      * 鏈連不上時每 30 秒重試，最多 20 次；不會影響啟動。
      */

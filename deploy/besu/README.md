@@ -8,6 +8,7 @@ Hyperledger Besu 私有鏈上（QBFT 共識、零手續費、資料存在硬碟�
 | `setup_besu.sh` | Pi（鏈主機） | 用 Docker 建立 1 或 4 個 Besu 驗證節點，RPC 開在 `:8545` |
 | `deploy_contracts.sh` | 有 Foundry 的 x86 機器（例如 192.168.1.60） | 產生正式的管理員 / 檔案上鏈帳號，部署兩份合約 |
 | `update_env.sh` | Pi | 把 Pi 與節點範本的 env.json 換成新鏈的設定 |
+| `deploy_validator_registry.sh` | 有 Foundry 的 x86 機器 | 部署 ValidatorRegistry（M1 授權簽章的 Validator 名單），用同一把管理員私鑰 |
 
 ## 步驟
 
