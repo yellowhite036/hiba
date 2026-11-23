@@ -59,9 +59,14 @@ public final class AuthorizationService {
     public record Verdict(boolean ok, String reason, int validSignatures, int required) {}
 
     private AuthorizationService(AuthorizationConfig config, Web3BlockchainService chain) {
+        this(config, chain, config.isEnabled() ? new ValidatorRegistryClient(chain, config.getValidatorRegistry()) : null);
+    }
+
+    /** 測試用：可換上假的鏈與名單（不啟動簽章服務、不設成全域實例） */
+    AuthorizationService(AuthorizationConfig config, Web3BlockchainService chain, ValidatorRegistryClient registry) {
         this.config = config;
         this.chain = chain;
-        this.registry = config.isEnabled() ? new ValidatorRegistryClient(chain, config.getValidatorRegistry()) : null;
+        this.registry = registry;
         this.http = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofMillis(config.getSignTimeoutMs()))
                 .build();
