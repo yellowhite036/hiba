@@ -82,7 +82,7 @@ hostname -I; grep -a '\[Auth\]' ~/HiBA/logs/hiba.log | tail -6 | grep -o '"messa
 | 三台 | `Validator set version 4 loaded: 3 active, threshold 2` |
 | 173、141、205 | `Signed certificate a8e31c4f from NewNode-173 for NewNode-141 (getFile)` |
 | 173 | `Certificate a8e31c4f for NewNode-141 (getFile): 3/3 validator signatures (threshold 2, set v4)` |
-| 141 | `Task authorized: 3/2 validator signatures, ok (certificate a8e31c4f)`（3 個有效、需要 2 個） |
+| 141 | `Task authorized: 3/2 validator signatures, ok (certificate a8e31c4f)`（3 個有效、需要 2 個；之後的版本改寫成 `3 valid validator signatures (need 2)`） |
 
 **結果：通過。**
 
@@ -162,6 +162,19 @@ sudo bash ~/hiba_dist/validators.sh suspend 7C55477C424BC1EE301D06A0124A29834C26
 **結果：通過。** 鏈上名單一變動，舊版本的請求即失效，被暫停的 Validator 立刻被排除。
 還原：`validators.sh resume <205 的 EK>`（名單 → v6，3 台 Active）。
 
+### E1／E2 enforce 模式（2026-11-23，jar `654c192f`，名單 v6）
+
+173、141、205 設定 `Authorization.mode = "enforce"` 後重啟。這一版在拒絕時會回傳失敗的 `TaskFinishMessage`
+（`success=false`、`transferred=false`、`error="Unauthorized: <原因>"`），因為 Broker 等待結果沒有逾時，不回覆會一直卡住。
+
+| # | 情境 | 結果 |
+|---|---|---|
+| E1 | 正常任務（3/3 簽章） | 205 取回 141 的檔案（`successCount 1`），整個請求 1.5 秒 |
+| E2 | 141、205 設 `allowedServices=["BlockchainFileProtect"]`，只剩 1/3 簽章 | 141：`Refused to sign certificate aa9360fe … not allowed`，接著 `Task REJECTED (mode=enforce, not executing): only 1 valid validator signatures, need 2`；205 收到 `successCount 0`，請求 1.3 秒結束，沒有卡住 |
+
+**結果：通過。** 簽章不足門檻時，執行節點拒絕執行，Broker 正常收尾。
+getFile 的回應不會帶出各節點的錯誤原因（外層 `success: true` 只表示請求處理完畢），要看拒絕原因需查執行節點的 log。
+
 ## 5. 尚未測試
 
 | 項目 | 程式中的檢查 | 說明 |
@@ -169,7 +182,7 @@ sudo bash ~/hiba_dist/validators.sh suspend 7C55477C424BC1EE301D06A0124A29834C26
 | 重放同一張有效憑證 | 執行節點 `certificate nonce already used (replay)`；Validator `nonce already signed (replay)` | 需攔截並重送 Netty 訊息，或寫 JUnit 測試 |
 | 竄改任務內容 | `task content does not match certificate` | 同上 |
 | 憑證送錯節點 | `certificate is for X, not Y` | 同上 |
-| `enforce` 模式 | 驗證不過時不執行任務 | 目前被拒的任務不會回覆結果，分派端會一直等，需先改成回傳 `TaskFinishMessage` |
+| enforce 模式下的其他服務 | 拒絕時回傳失敗結果 | 只測過 getFile；其他服務的 `merge` 收到失敗結果的行為未確認 |
 | 鏈離線 | 名單沿用最後一次讀到的版本（最多 24 小時），公鑰沿用 `LastKnownKeyStore` | 可依 `CHAIN_OFFLINE_TEST.md` 的方式停止 Besu 後重做 P1 |
 | 網域 B（11、12） | — | 173 到 10.10.2.x:8095 的連線未確認 |
 

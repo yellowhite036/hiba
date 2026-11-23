@@ -21,6 +21,7 @@ import org.gslab.message_hiba.TaskStartMessage;
 import org.gslab.model.RequestId;
 import org.gslab.model.TaskAssignment;
 import org.gslab.mService.multicast.MulticastController;
+import org.gslab.sdns.HiBAInitial;
 import org.gslab.task.TaskDataAdapter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -178,7 +179,7 @@ public class ClientChannelHandlers {
                     .addKeyValue("taskInfo", msg.getTaskInformation())
                     .log("Received TaskStartMessage");
 
-            if (!checkAuthorization(msg)) {
+            if (!checkAuthorization(ctx, msg)) {
                 return;
             }
 
@@ -190,11 +191,12 @@ public class ClientChannelHandlers {
         }
 
         /**
-         * M1：執行前自行驗證多 Validator 授權憑證。mode=log 只記錄；mode=enforce 驗證不過就不執行。
+         * M1：執行前自行驗證多 Validator 授權憑證。mode=log 只記錄；mode=enforce 驗證不過就不執行，
+         * 並回傳失敗的 TaskFinishMessage（Broker 等結果沒有逾時，不回覆會一直卡住）。
          *
          * @return 是否繼續處理這個任務
          */
-        private boolean checkAuthorization(TaskStartMessage msg) {
+        private boolean checkAuthorization(ChannelHandlerContext ctx, TaskStartMessage msg) {
             AuthorizationService auth = AuthorizationService.get();
             if (!auth.isEnabled()) {
                 return true;
@@ -203,20 +205,45 @@ public class ClientChannelHandlers {
             if (v.ok()) {
                 logger.atInfo()
                         .addKeyValue("requestId", msg.getRequestId())
-                        .log("[Auth] Task authorized: " + v.validSignatures() + "/" + v.required()
-                                + " validator signatures, " + v.reason());
+                        .log("[Auth] Task authorized: " + v.validSignatures() + " valid validator signatures (need "
+                                + v.required() + "), " + v.reason());
                 return true;
             }
             if (auth.mode() == AuthorizationConfig.Mode.ENFORCE) {
                 logger.atError()
                         .addKeyValue("requestId", msg.getRequestId())
-                        .log("[Auth] Task REJECTED: " + v.reason());
+                        .log("[Auth] Task REJECTED (mode=enforce, not executing): " + v.reason());
+                ctx.channel().writeAndFlush(new TaskFinishMessage(rejectionResult(msg, v.reason())));
                 return false;
             }
             logger.atWarn()
                     .addKeyValue("requestId", msg.getRequestId())
                     .log("[Auth] Task would be rejected (mode=log, still executing): " + v.reason());
             return true;
+        }
+
+        /**
+         * 授權被拒時回給 Broker 的結果。欄位型別配合 TaskResult.fromMap（requestId 為字串）
+         * 與 getFileDistributor.merge（transferred、error）。
+         */
+        private static Map<String, Object> rejectionResult(TaskStartMessage msg, String reason) {
+            Map<String, Object> info = msg.getTaskInformation();
+            Map<String, Object> r = new java.util.HashMap<>();
+            r.put("requestName", msg.getRequestName());
+            if (msg.getRequestId() != null) {
+                r.put("requestId", msg.getRequestId().toString());
+            }
+            if (info != null && info.get("serviceName") instanceof String svc) {
+                r.put("serviceName", svc);
+            }
+            r.put("nodeName", HiBAInitial.nodeName);
+            r.put("success", false);
+            r.put("state", false);
+            r.put("transferred", false);
+            r.put("authorizationRejected", true);
+            r.put("errorMessage", "Unauthorized: " + reason);
+            r.put("error", "Unauthorized: " + reason);
+            return r;
         }
 
         private void handleWorkerNode(ChannelHandlerContext ctx, TaskStartMessage msg) {
