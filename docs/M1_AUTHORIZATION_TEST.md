@@ -48,7 +48,7 @@
 | ValidatorRegistry | `0x2D0332C4CA7964Efe46426975fd6957EA85363e6`（owner `0xd98f37C8…`，在 Pi 上用 forge 部署） |
 | 名單 | setVersion 4，門檻 0（自動 ceil(2n/3) = 2） |
 | Validator | NewNode-173 `621EB343…`（broker）、NewNode-141 `42BD3E6B…`、NewNode-205 `7C55477C…`，皆 domainA、埠 8095 |
-| mode | 173、141、205 為 `log`；11、12 未啟用（10.10.2.x 網段，173 是否連得到 8095 未確認） |
+| mode | 173、141、205 為 `log`（E1 起為 `enforce`）；11、12 於 R1-2 起以 `log` 加入（domainB） |
 | 測試發起端 | 192.168.1.223（Windows） |
 
 部署步驟：`deploy/besu/deploy_validator_registry.sh` → Pi 上 `validators.sh set-env <位址>` → `validators.sh add <EK> domainA <IP>:8095`
@@ -218,13 +218,31 @@ cd ~/build/hiba-dev/hiba && mvn -pl hiba-core -am test -Dtest=AuthorizationServi
 
 **結果：`Tests run: 21, Failures: 0, Errors: 0` — 通過。**
 
+### R1 Netty 轉送收集簽章（2026-11-23，jar `e32744bd`）
+
+網段 10.10.2.0/24（11、12）在路由器 192.168.1.132 後面，173 沒有往 10.10.2.x 的路由、無法主動連到 11、12。
+HiBA 的連線一律由下層主動連上層，所以簽章請求改為沿既有連線轉送（`SignRelay`，`Authorization.signTransport = "netty"`，預設）：
+
+```
+173 ─AuthSignRequest─▶ 141、205、11（173 的 clients）
+                        11 ─AuthSignRequest─▶ 12（11 的 client）
+                        11 ◀─AuthSignResponse─ 12
+173 ◀─AuthSignResponse（11＋12 的簽章）─ 11
+```
+
+| # | 情境 | 結果 |
+|---|---|---|
+| R1-1 | 網域 A 3 台（v6），改走 Netty | 173：`Certificate 37de89ca … 3/3 validator signatures (threshold 2, set v6)`，`signTransport=NETTY`；141：`Signed certificate 37de89ca` |
+| R1-2 | 173 移除 10.10.2.x 路由（`curl 10.10.2.11:8095` 連不到）後，11、12 以 domainB 加入名單（v8，5 台，門檻 4） | 173：`Certificate c4586616 for NewNode-141 (getFile): 5/5 validator signatures (threshold 4, set v8)`；11：`Signed certificate c4586616`；任務成功 |
+
+**結果：通過。** 上層不需要能主動連到下層；轉送節點（11）只傳遞，12 的簽章由 173 以鏈上公鑰驗證。
+
 ## 5. 尚未測試
 
 | 項目 | 說明 |
 |---|---|
 | enforce 模式下的其他服務 | 只測過 getFile；其他服務的 `merge` 收到失敗結果的行為未確認 |
 | 鏈離線 | 名單沿用最後一次讀到的版本（最多 24 小時），公鑰沿用 `LastKnownKeyStore`；可依 `CHAIN_OFFLINE_TEST.md` 停止 Besu 後重做 P1 |
-| 網域 B（11、12） | 尚未加入名單 |
 
 ## 6. 已知限制
 

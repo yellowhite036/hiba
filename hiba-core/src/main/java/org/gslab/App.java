@@ -23,6 +23,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.gslab.SdnNetwork.Initializer;
+import org.gslab.authorization.SignRelay;
 import org.gslab.util.JsonFileUtil;
 import org.gslab.util.PathUtil;
 import org.gslab.context.RequestManager;
@@ -88,6 +89,8 @@ public class App {
 
         // Initialize network first before any other components access it
         this.network = network;
+        // M1 授權：簽章請求沿既有連線轉送，需要知道相鄰連線
+        SignRelay.get().setNetwork(network);
         this.fileProtectionService = HiBAInitial.fileProtectionService;
         this.tpmService = HiBAInitial.tpmService;
         // Setup handlers before starting threads
@@ -172,6 +175,10 @@ public class App {
                                 "WaitingRequestMessageHandler",
                                 new ServerChannelHandlers.WaitingRequestHandler(requestManager));
 
+                // M1 授權：沿既有連線轉送簽章請求（下層送上來的請求與回覆）
+                channel.pipeline().addLast("AuthSignRequestHandler", new SignRelay.RequestHandler());
+                channel.pipeline().addLast("AuthSignResponseHandler", new SignRelay.ResponseHandler());
+
                 channel.pipeline()
                         .addLast(
                                 "RegisteMessageHandler",
@@ -218,6 +225,9 @@ public class App {
                                 "TaskStartMessageHandler",
                                 new ClientChannelHandlers.TaskStartHandler(
                                         network, requestQueue, requestManager, taskExecutor, App.this::getService));
+                // M1 授權：沿既有連線轉送簽章請求（上層送下來的請求與回覆）
+                channel.pipeline().addLast("AuthSignRequestHandler", new SignRelay.RequestHandler());
+                channel.pipeline().addLast("AuthSignResponseHandler", new SignRelay.ResponseHandler());
                 logger.atDebug()
                         .addKeyValue("channelId", channel.id())
                         .log("initializeClientHandler.initial: Client channel pipeline initialized");

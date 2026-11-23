@@ -26,12 +26,23 @@ public final class AuthorizationConfig {
         ENFORCE
     }
 
+    /** Broker 向 Validator 收集簽章的方式 */
+    public enum Transport {
+        /** 沿 HiBA 既有連線轉送（SignRelay），上層不需要能主動連到下層（預設） */
+        NETTY,
+        /** 直接 HTTP 連到每個 Validator 的 endpoint（M1 最初的做法） */
+        HTTP,
+        /** 先 NETTY，缺少的 Validator 再用 HTTP 補 */
+        BOTH
+    }
+
     private final Mode mode;
     private final String validatorRegistry;
     private final int validatorPort;
     private final int certTtlSeconds;
     private final int signTimeoutMs;
     private final List<String> allowedServices;
+    private final Transport signTransport;
 
     private AuthorizationConfig(
             Mode mode,
@@ -39,17 +50,19 @@ public final class AuthorizationConfig {
             int validatorPort,
             int certTtlSeconds,
             int signTimeoutMs,
-            List<String> allowedServices) {
+            List<String> allowedServices,
+            Transport signTransport) {
         this.mode = mode;
         this.validatorRegistry = validatorRegistry;
         this.validatorPort = validatorPort;
         this.certTtlSeconds = certTtlSeconds;
         this.signTimeoutMs = signTimeoutMs;
         this.allowedServices = List.copyOf(allowedServices);
+        this.signTransport = signTransport;
     }
 
     public static AuthorizationConfig off() {
-        return new AuthorizationConfig(Mode.OFF, "", 8095, 300, 3000, List.of());
+        return new AuthorizationConfig(Mode.OFF, "", 8095, 300, 3000, List.of(), Transport.NETTY);
     }
 
     public static AuthorizationConfig load(String envJsonPath) {
@@ -71,6 +84,13 @@ public final class AuthorizationConfig {
                 log.warn("[Auth] Authorization.mode={} but validatorRegistry is empty, using off", mode);
                 mode = Mode.OFF;
             }
+            Transport transport;
+            try {
+                transport = Transport.valueOf(a.optString("signTransport", "netty").trim().toUpperCase());
+            } catch (IllegalArgumentException e) {
+                log.warn("[Auth] Unknown Authorization.signTransport '{}', using netty", a.optString("signTransport"));
+                transport = Transport.NETTY;
+            }
             List<String> allowed = new ArrayList<>();
             JSONArray arr = a.optJSONArray("allowedServices");
             if (arr != null) {
@@ -87,7 +107,8 @@ public final class AuthorizationConfig {
                     a.optInt("validatorPort", 8095),
                     Math.max(30, a.optInt("certTtlSeconds", 300)),
                     Math.max(500, a.optInt("signTimeoutMs", 3000)),
-                    allowed);
+                    allowed,
+                    transport);
         } catch (Exception e) {
             log.warn("[Auth] Cannot read Authorization config from {}: {}, using off", envJsonPath, e.getMessage());
             return off();
@@ -118,6 +139,10 @@ public final class AuthorizationConfig {
         return signTimeoutMs;
     }
 
+    public Transport getSignTransport() {
+        return signTransport;
+    }
+
     /** 空的代表不限制服務 */
     public List<String> getAllowedServices() {
         return allowedServices;
@@ -127,6 +152,6 @@ public final class AuthorizationConfig {
     public String toString() {
         return "mode=" + mode + ", validatorRegistry=" + validatorRegistry + ", validatorPort=" + validatorPort
                 + ", certTtlSeconds=" + certTtlSeconds + ", signTimeoutMs=" + signTimeoutMs
-                + ", allowedServices=" + allowedServices;
+                + ", allowedServices=" + allowedServices + ", signTransport=" + signTransport;
     }
 }

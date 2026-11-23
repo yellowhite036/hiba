@@ -152,24 +152,50 @@ public final class AuthorizationService {
 
             String body = cert.toRequestJson().toString();
             List<Validator> vs = new ArrayList<>(set.active().values());
-            List<CompletableFuture<Optional<ValidatorSignature>>> futures = new ArrayList<>();
-            for (Validator v : vs) {
-                futures.add(requestSignature(v, body, payload));
-            }
-            try {
-                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-                        .get(config.getSignTimeoutMs(), TimeUnit.MILLISECONDS);
-            } catch (TimeoutException e) {
-                log.debug("[Auth] Some validators did not answer within {} ms", config.getSignTimeoutMs());
-            }
             Set<String> seen = new HashSet<>();
-            for (CompletableFuture<Optional<ValidatorSignature>> f : futures) {
-                if (f.isDone() && !f.isCompletedExceptionally()) {
-                    f.getNow(Optional.empty()).ifPresent(sig -> {
-                        if (seen.add(sig.validatorId())) {
-                            cert.signatures.add(sig);
+            List<String> notes = new ArrayList<>();
+            AuthorizationConfig.Transport transport = config.getSignTransport();
+
+            // 1. 沿 HiBA 既有連線轉送（預設）。每個簽章都要是名單上的 Validator，且能用鏈上公鑰驗證
+            if (transport != AuthorizationConfig.Transport.HTTP) {
+                SignRelay.Collected c = SignRelay.get().collect(cert.certificateId, body, config.getSignTimeoutMs());
+                for (ValidatorSignature sig : c.signatures()) {
+                    if (set.contains(sig.validatorId())
+                            && !seen.contains(sig.validatorId())
+                            && verifySignature(sig.validatorId(), payload, sig.signature())) {
+                        seen.add(sig.validatorId());
+                        cert.signatures.add(sig);
+                    } else if (!set.contains(sig.validatorId()) || !seen.contains(sig.validatorId())) {
+                        log.warn("[Auth] Dropped invalid relayed signature claiming validator {}", sig.validatorId());
+                    }
+                }
+                notes.addAll(c.notes());
+            }
+
+            // 2. 直接 HTTP（transport=http，或 both 時補上還缺的 Validator）
+            if (transport != AuthorizationConfig.Transport.NETTY) {
+                List<CompletableFuture<Optional<ValidatorSignature>>> futures = new ArrayList<>();
+                for (Validator v : vs) {
+                    if (!seen.contains(v.ekFingerprint())) {
+                        futures.add(requestSignature(v, body, payload));
+                    }
+                }
+                if (!futures.isEmpty()) {
+                    try {
+                        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                                .get(config.getSignTimeoutMs(), TimeUnit.MILLISECONDS);
+                    } catch (TimeoutException e) {
+                        log.debug("[Auth] Some validators did not answer within {} ms", config.getSignTimeoutMs());
+                    }
+                    for (CompletableFuture<Optional<ValidatorSignature>> f : futures) {
+                        if (f.isDone() && !f.isCompletedExceptionally()) {
+                            f.getNow(Optional.empty()).ifPresent(sig -> {
+                                if (seen.add(sig.validatorId())) {
+                                    cert.signatures.add(sig);
+                                }
+                            });
                         }
-                    });
+                    }
                 }
             }
             taskMap.put(AuthorizationCertificate.TASK_KEY, cert.toMap());
@@ -180,8 +206,9 @@ public final class AuthorizationService {
                         cert.shortId(), targetNode, serviceName, got, vs.size(), set.threshold(), set.version());
             } else {
                 log.warn(
-                        "[Auth] Certificate {} for {} ({}) below threshold: {}/{} signatures, need {} (set v{})",
-                        cert.shortId(), targetNode, serviceName, got, vs.size(), set.threshold(), set.version());
+                        "[Auth] Certificate {} for {} ({}) below threshold: {}/{} signatures, need {} (set v{}){}",
+                        cert.shortId(), targetNode, serviceName, got, vs.size(), set.threshold(), set.version(),
+                        notes.isEmpty() ? "" : " — " + String.join("; ", notes));
             }
         } catch (Exception e) {
             log.warn("[Auth] Failed to build authorization for {}: {}", targetNode, e.getMessage());
