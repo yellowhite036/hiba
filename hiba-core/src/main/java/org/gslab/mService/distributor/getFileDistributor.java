@@ -26,6 +26,8 @@ public class getFileDistributor extends Distributor {
 
     // 儲存所有節點的執行結果
     private final Map<String, Map<String, Object>> nodeAllResult = new HashMap<>();
+    /** 各節點回報的失敗原因（例如 M1 授權被拒的 "Unauthorized: …"），沒取到任何檔案時放進回應 */
+    private final Map<String, String> nodeErrors = new java.util.LinkedHashMap<>();
 
     @Override
     public Distributor getNewInstance() {
@@ -184,6 +186,9 @@ public class getFileDistributor extends Distributor {
                 failedTransfers++;
                 failedNodes.add(nodeName);
                 String error = (String) result.get("error");
+                if (error != null && !error.isEmpty()) {
+                    nodeErrors.put(nodeName, error);
+                }
                 logger.atWarn().log("File transfer failed from node {}: {}", nodeName, error);
                 continue;
             }
@@ -342,6 +347,24 @@ public class getFileDistributor extends Distributor {
                 result.put("error", "Transfer failed: " + e.getMessage());
                 logger.atError().setCause(e).log("File transfer failed: ");
             }
+        }
+
+        // 沒取到任何檔案、而有節點回報失敗原因時（例如 M1 授權被拒），把原因帶給請求者
+        if (!Boolean.TRUE.equals(result.get("transferred")) && !nodeErrors.isEmpty()) {
+            StringBuilder msg = new StringBuilder();
+            nodeErrors.forEach((node, err) -> {
+                if (msg.length() > 0) {
+                    msg.append("; ");
+                }
+                msg.append(node).append(": ").append(err);
+            });
+            result.put("nodeErrors", new java.util.LinkedHashMap<>(nodeErrors));
+            result.put("error", msg.toString());
+            // 請求節點（RequestFinishMessageHandler）只讀內層 result，所以 success／errorMessage 要放在這裡
+            result.put("success", false);
+            result.put("errorMessage", msg.toString());
+            resultInformation.put("success", false);
+            resultInformation.put("errorMessage", msg.toString());
         }
 
         // 設置 result 字段，這是客戶端期望的

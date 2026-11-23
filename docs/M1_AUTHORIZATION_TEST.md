@@ -173,7 +173,14 @@ sudo bash ~/hiba_dist/validators.sh suspend 7C55477C424BC1EE301D06A0124A29834C26
 | E2 | 141、205 設 `allowedServices=["BlockchainFileProtect"]`，只剩 1/3 簽章 | 141：`Refused to sign certificate aa9360fe … not allowed`，接著 `Task REJECTED (mode=enforce, not executing): only 1 valid validator signatures, need 2`；205 收到 `successCount 0`，請求 1.3 秒結束，沒有卡住 |
 
 **結果：通過。** 簽章不足門檻時，執行節點拒絕執行，Broker 正常收尾。
-getFile 的回應不會帶出各節點的錯誤原因（外層 `success: true` 只表示請求處理完畢），要看拒絕原因需查執行節點的 log。
+
+| # | 情境 | 結果（jar `0f2209f4`） |
+|---|---|---|
+| E3 | 同 E2，檢查請求者收到的回應 | `"success": false`，`error.message` = `NewNode-173: Requested file not in resource list: wallet_test.txt; NewNode-141: Unauthorized: only 1 valid validator signatures, need 2` |
+
+E3 之前（jar `654c192f`）getFile 只回 `successCount 0`，看不到原因。現在 `getFileDistributor` 在完全沒取到檔案時，
+把各節點回報的錯誤放進內層 `result` 的 `success`／`errorMessage`（請求節點的 `RequestFinishMessageHandler` 只讀內層 `result`）。
+錯誤代碼目前顯示 `INTERNAL_ERROR`（`UnifiedError.ErrorCode` 沒有「未授權」這一類）。
 
 ### U1 離線單元測試（JUnit，2026-11-23）
 
