@@ -43,6 +43,7 @@ public final class AuthorizationConfig {
     private final int signTimeoutMs;
     private final List<String> allowedServices;
     private final Transport signTransport;
+    private final String domainId;
 
     private AuthorizationConfig(
             Mode mode,
@@ -51,7 +52,8 @@ public final class AuthorizationConfig {
             int certTtlSeconds,
             int signTimeoutMs,
             List<String> allowedServices,
-            Transport signTransport) {
+            Transport signTransport,
+            String domainId) {
         this.mode = mode;
         this.validatorRegistry = validatorRegistry;
         this.validatorPort = validatorPort;
@@ -59,10 +61,11 @@ public final class AuthorizationConfig {
         this.signTimeoutMs = signTimeoutMs;
         this.allowedServices = List.copyOf(allowedServices);
         this.signTransport = signTransport;
+        this.domainId = domainId;
     }
 
     public static AuthorizationConfig off() {
-        return new AuthorizationConfig(Mode.OFF, "", 8095, 300, 3000, List.of(), Transport.NETTY);
+        return new AuthorizationConfig(Mode.OFF, "", 8095, 300, 3000, List.of(), Transport.NETTY, "");
     }
 
     public static AuthorizationConfig load(String envJsonPath) {
@@ -108,7 +111,8 @@ public final class AuthorizationConfig {
                     Math.max(30, a.optInt("certTtlSeconds", 300)),
                     Math.max(500, a.optInt("signTimeoutMs", 3000)),
                     allowed,
-                    transport);
+                    transport,
+                    a.optString("domainId", "").trim());
         } catch (Exception e) {
             log.warn("[Auth] Cannot read Authorization config from {}: {}, using off", envJsonPath, e.getMessage());
             return off();
@@ -139,6 +143,11 @@ public final class AuthorizationConfig {
         return signTimeoutMs;
     }
 
+    /** 不是 Validator 的節點所屬網域（Validator 以鏈上名單為準）；空字串＝未設定 */
+    public String getDomainId() {
+        return domainId;
+    }
+
     public Transport getSignTransport() {
         return signTransport;
     }
@@ -152,6 +161,7 @@ public final class AuthorizationConfig {
     public String toString() {
         return "mode=" + mode + ", validatorRegistry=" + validatorRegistry + ", validatorPort=" + validatorPort
                 + ", certTtlSeconds=" + certTtlSeconds + ", signTimeoutMs=" + signTimeoutMs
-                + ", allowedServices=" + allowedServices + ", signTransport=" + signTransport;
+                + ", allowedServices=" + allowedServices + ", signTransport=" + signTransport
+                + (domainId.isEmpty() ? "" : ", domainId=" + domainId);
     }
 }

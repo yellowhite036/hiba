@@ -34,7 +34,11 @@
 | nonce 沒用過 | ✔（各 Validator 自己記） | ✔ |
 | 目標節點是自己 | — | ✔ |
 | 任務內容雜湊與憑證一致 | — | ✔ |
-| 有效 Validator 簽章數 ≥ 鏈上門檻 | — | ✔ |
+| 目標節點所屬網域內的有效 Validator 簽章數 ≥ 該網域過半數（D1 起） | — | ✔ |
+
+**門檻（D1 起）**：以執行任務節點所屬網域計算，需要該網域 Active Validator 的過半數 `floor(n/2)+1`；
+其他網域的簽章不計入。斷線的 Validator 仍算在 n 內（不因收不到回應而降低門檻），計畫性停機請用 `validators.sh suspend`／`resume`。
+節點的網域：是 Validator 時以鏈上名單為準，否則用 env.json 的 `Authorization.domainId`；兩者都沒有時退回鏈上全網門檻（`setThreshold`，0＝ceil(2n/3)）。
 
 `Authorization.mode`：`off`（預設，完全不啟用）／`log`（只記錄，任務照常執行）／`enforce`（驗證不過就不執行）。
 
@@ -218,6 +222,19 @@ cd ~/build/hiba-dev/hiba && mvn -pl hiba-core -am test -Dtest=AuthorizationServi
 
 **結果：`Tests run: 21, Failures: 0, Errors: 0` — 通過。**
 
+D1（網域過半數）新增 6 項，名單模擬 v9：V1–V3 domainA、V4–V5 domainB、全網門檻 4：
+
+| 對象 | 情境 | 預期 |
+|---|---|---|
+| 執行節點（domainA） | 網域 B 全部沒簽，A 有 3/3 | 通過（舊規則 3/5 < 4 會被拒） |
+| 執行節點（domainA） | A 只有 1 個、B 有 2 個簽章 | `only 1 … in domainA, need 2`（別網域的不計入） |
+| 執行節點（domainB） | B 只有 1 個簽章 | 被拒（2 台的網域需要 2 個） |
+| 執行節點（domainA） | A 的 3 台中 1 台斷線（沒簽） | 2/3 通過，門檻仍為 2（斷線不降低門檻） |
+| 執行節點（非 Validator） | env.json `domainId = domainB` | 以 domainB 的過半數計算 |
+| 執行節點（非 Validator） | 不知道網域 | 退回全網門檻 4 |
+
+**結果：共 27 項，`Tests run: 27, Failures: 0, Errors: 0`（待在 Pi 上執行確認）。**
+
 ### R1 Netty 轉送收集簽章（2026-11-23，jar `e32744bd`）
 
 網段 10.10.2.0/24（11、12）在路由器 192.168.1.132 後面，173 沒有往 10.10.2.x 的路由、無法主動連到 11、12。
@@ -237,6 +254,18 @@ HiBA 的連線一律由下層主動連上層，所以簽章請求改為沿既有
 
 **結果：通過。** 上層不需要能主動連到下層；轉送節點（11）只傳遞，12 的簽章由 173 以鏈上公鑰驗證。
 
+### D1 網域過半數門檻（2026-11-24，名單 v8）
+
+原本的全網門檻 ceil(2n/3) 在 5 台時是 4：任一網域整個斷線（例如網域 B 兩台）其他網域的任務就全部停擺。
+改為「執行任務節點所屬網域的過半數」後，每條產線只需要自己網域的 Validator 同意。
+
+| # | 情境 | 結果 |
+|---|---|---|
+| D1-1 | 5 台都在線，透過 205 送 getFile（目標 141，domainA） | 173：`Certificate bdc05e9c for NewNode-141 (getFile): domainA 3/3 (need 2), domainB 2/2 (need 2) (set v8)`；141：`Task authorized: 3 valid validator signatures (need 2), ok (certificate bdc05e9c in domainA)`；任務成功 |
+| D1-2 | 停止 11、12 的 `hiba.service`（網域 B 整個斷線），再送一次 | 173：`Certificate f72da38f for NewNode-141 (getFile): domainA 3/3 (need 2), domainB 0/2 (need 2) (set v8)`；141：`Task authorized: 3 valid validator signatures (need 2), ok (certificate f72da38f in domainA)`；任務成功（舊規則 3/5 < 4 會被拒） |
+
+**結果：通過。** 一個網域斷線不影響其他網域；網域 B 的 n 仍為 2（斷線不降低門檻）。
+
 ## 5. 尚未測試
 
 | 項目 | 說明 |
@@ -250,3 +279,5 @@ HiBA 的連線一律由下層主動連上層，所以簽章請求改為沿既有
 - 任務內容雜湊是對任務 Map 的標準化字串計算。若 Map 中有物件沒有實作 `toString`，兩端算出的值會不同，log 會出現 `task content does not match certificate`。
 - jar 自動更新目前沒有簽章保護：accounting server 被入侵時，可推送新版 jar 繞過本機制（M2 處理）。
 - Validator 名單目前由管理員維護（M1）；改由網域投票決定是之後的里程碑。
+- 網域過半數：網域內 Validator 斷線超過一半時，該網域的任務會被拒（刻意設計，避免惡意切斷降低門檻）；計畫性停機請先 `suspend`。
+  只有 1 台 Validator 的網域，門檻是 1，等於該台可單獨授權，網域至少應有 3 台。

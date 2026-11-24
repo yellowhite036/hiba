@@ -65,7 +65,7 @@ class AuthorizationServiceTest {
     static void keys() throws Exception {
         KeyPairGenerator g = KeyPairGenerator.getInstance("RSA");
         g.initialize(2048);
-        for (String id : List.of("V1", "V2", "V3", "R", "X")) {
+        for (String id : List.of("V1", "V2", "V3", "V4", "V5", "R", "X")) {
             KEYS.put(id, g.generateKeyPair());
         }
     }
@@ -244,6 +244,86 @@ class AuthorizationServiceTest {
     }
 
     // =====================================================================
+    // 以網域計算門檻（網域 A：V1–V3，網域 B：V4–V5，全網門檻 4）
+    // =====================================================================
+
+    @Test
+    @DisplayName("網域：A 的節點只需 A 過半數（2/3），網域 B 斷線也通過")
+    void domainMajorityPassesWhenOtherDomainOffline() throws Exception {
+        twoDomains();
+        actAsValidator("V1");
+        Map<String, Object> task = task();
+        attach(task, cert(task, 9), "V1", "V2");
+
+        AuthorizationService.Verdict v = service.verify(task);
+
+        assertThat(v.ok()).as(v.reason()).isTrue();
+        assertThat(v.required()).isEqualTo(2);
+        assertThat(v.reason()).contains("domainA");
+    }
+
+    @Test
+    @DisplayName("網域：別的網域的簽章不算進自己網域的門檻")
+    void otherDomainSignaturesDoNotCount() throws Exception {
+        twoDomains();
+        actAsValidator("V1");
+        Map<String, Object> task = task();
+        attach(task, cert(task, 9), "V4", "V5");
+
+        assertRejected(service.verify(task), "only 0 valid validator signatures in domainA, need 2");
+    }
+
+    @Test
+    @DisplayName("網域：B 只有 2 台時需要 2 台；只有 1 台簽 → 拒絕")
+    void smallDomainNeedsBoth() throws Exception {
+        twoDomains();
+        actAsValidator("V4");
+        Map<String, Object> task = task();
+        attach(task, cert(task, 9), "V4", "V1", "V2", "V3");
+
+        assertRejected(service.verify(task), "only 1 valid validator signatures in domainB, need 2");
+
+        Map<String, Object> task2 = task();
+        attach(task2, cert(task2, 9), "V4", "V5");
+        assertThat(service.verify(task2).ok()).isTrue();
+    }
+
+    @Test
+    @DisplayName("網域：斷線的 Validator 仍算在名單內（A 只有 1 台簽 → 拒絕，不會因為其他台沒回應而降低門檻）")
+    void offlineValidatorsStillCount() throws Exception {
+        twoDomains();
+        actAsValidator("V1");
+        Map<String, Object> task = task();
+        attach(task, cert(task, 9), "V1");
+
+        assertRejected(service.verify(task), "only 1 valid validator signatures in domainA, need 2");
+    }
+
+    @Test
+    @DisplayName("網域：不是 Validator 的節點用 env.json 的 domainId")
+    void nonValidatorUsesConfiguredDomain() throws Exception {
+        twoDomains();
+        AuthorizationService inB = new AuthorizationService(config("enforce", List.of(), "domainB"), chain, registry);
+        Map<String, Object> task = task();
+        attach(task, cert(task, 9), "V4", "V5");
+        assertThat(inB.verify(task).ok()).isTrue();
+
+        Map<String, Object> task2 = task();
+        attach(task2, cert(task2, 9), "V1", "V2", "V3");
+        assertRejected(inB.verify(task2), "in domainB, need 2");
+    }
+
+    @Test
+    @DisplayName("網域：不知道自己屬於哪個網域時，退回全網門檻")
+    void unknownDomainFallsBackToGlobalThreshold() throws Exception {
+        twoDomains();
+        Map<String, Object> task = task();
+        attach(task, cert(task, 9), "V1", "V2", "V3");
+
+        assertRejected(service.verify(task), "only 3 valid validator signatures, need 4");
+    }
+
+    // =====================================================================
     // Validator 端（evaluateAndSign）
     // =====================================================================
 
@@ -337,13 +417,17 @@ class AuthorizationServiceTest {
     // =====================================================================
 
     private AuthorizationConfig config(String mode, List<String> allowed) throws Exception {
+        return config(mode, allowed, "");
+    }
+
+    private AuthorizationConfig config(String mode, List<String> allowed, String domainId) throws Exception {
         Path env = tmp.resolve("env-" + UUID.randomUUID() + ".json");
         String list = allowed.isEmpty() ? "" : "\"" + String.join("\",\"", allowed) + "\"";
         Files.writeString(
                 env,
                 "{\"Authorization\":{\"mode\":\"" + mode
                         + "\",\"validatorRegistry\":\"0x0000000000000000000000000000000000000001\","
-                        + "\"certTtlSeconds\":300,\"allowedServices\":[" + list + "]}}");
+                        + "\"certTtlSeconds\":300,\"domainId\":\"" + domainId + "\",\"allowedServices\":[" + list + "]}}");
         return AuthorizationConfig.load(env.toString());
     }
 
@@ -354,6 +438,18 @@ class AuthorizationServiceTest {
         }
         when(registry.current())
                 .thenReturn(Optional.of(new ValidatorSet(version, threshold, active, System.currentTimeMillis())));
+    }
+
+    /** 名單 v9：網域 A = V1–V3、網域 B = V4–V5，全網門檻 4 */
+    private void twoDomains() {
+        Map<String, Validator> active = new LinkedHashMap<>();
+        for (String id : List.of("V1", "V2", "V3")) {
+            active.put(id, new Validator(id, "domainA", ""));
+        }
+        for (String id : List.of("V4", "V5")) {
+            active.put(id, new Validator(id, "domainB", ""));
+        }
+        when(registry.current()).thenReturn(Optional.of(new ValidatorSet(9, 4, active, System.currentTimeMillis())));
     }
 
     private static Map<String, Object> task() {
@@ -370,6 +466,10 @@ class AuthorizationServiceTest {
 
     /** Broker（R）為任務建立的憑證，還沒有 Validator 簽章 */
     private static AuthorizationCertificate cert(Map<String, Object> task) throws Exception {
+        return cert(task, 4);
+    }
+
+    private static AuthorizationCertificate cert(Map<String, Object> task, long version) throws Exception {
         long now = System.currentTimeMillis();
         AuthorizationCertificate c = new AuthorizationCertificate();
         c.certificateId = UUID.randomUUID().toString();
@@ -383,7 +483,7 @@ class AuthorizationServiceTest {
         c.nonce = UUID.randomUUID().toString();
         c.issuedAt = now;
         c.expiresAt = now + 300_000;
-        c.validatorSetVersion = 4;
+        c.validatorSetVersion = version;
         c.requiredThreshold = 2;
         c.requesterSignature = sign("R", c.signingPayload());
         return c;

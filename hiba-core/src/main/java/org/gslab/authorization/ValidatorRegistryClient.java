@@ -40,6 +40,29 @@ public class ValidatorRegistryClient {
         public int size() {
             return active.size();
         }
+
+        /** 這個 EK 所屬的網域；不是 Active Validator 時為 null */
+        public String domainOf(String ek) {
+            Validator v = ek == null ? null : active.get(ek);
+            return v == null ? null : v.domainId();
+        }
+
+        /** 某網域的 Active Validator 數 */
+        public int domainSize(String domainId) {
+            int n = 0;
+            for (Validator v : active.values()) {
+                if (v.domainId().equals(domainId)) {
+                    n++;
+                }
+            }
+            return n;
+        }
+
+        /** 某網域需要的簽章數：過半數 floor(n/2)+1；沒有 Validator 時為 0 */
+        public int domainMajority(String domainId) {
+            int n = domainSize(domainId);
+            return n == 0 ? 0 : n / 2 + 1;
+        }
     }
 
     private final Web3BlockchainService chain;

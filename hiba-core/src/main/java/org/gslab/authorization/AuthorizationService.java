@@ -199,15 +199,39 @@ public final class AuthorizationService {
                 }
             }
             taskMap.put(AuthorizationCertificate.TASK_KEY, cert.toMap());
-            int got = cert.signatures.size();
-            if (got >= set.threshold() && set.threshold() > 0) {
+            // 各網域收到的有效簽章（執行節點以「自己所屬網域」的過半數判斷）
+            Map<String, Integer> byDomain = new java.util.TreeMap<>();
+            for (Validator v : vs) {
+                byDomain.putIfAbsent(v.domainId(), 0);
+            }
+            for (ValidatorSignature sig : cert.signatures) {
+                byDomain.merge(set.domainOf(sig.validatorId()), 1, Integer::sum);
+            }
+            StringBuilder summary = new StringBuilder();
+            boolean anyMajority = false;
+            for (Map.Entry<String, Integer> e : byDomain.entrySet()) {
+                int need = set.domainMajority(e.getKey());
+                anyMajority |= e.getValue() >= need && need > 0;
+                if (summary.length() > 0) {
+                    summary.append(", ");
+                }
+                summary.append(e.getKey())
+                        .append(' ')
+                        .append(e.getValue())
+                        .append('/')
+                        .append(set.domainSize(e.getKey()))
+                        .append(" (need ")
+                        .append(need)
+                        .append(')');
+            }
+            if (anyMajority) {
                 log.info(
-                        "[Auth] Certificate {} for {} ({}): {}/{} validator signatures (threshold {}, set v{})",
-                        cert.shortId(), targetNode, serviceName, got, vs.size(), set.threshold(), set.version());
+                        "[Auth] Certificate {} for {} ({}): {} (set v{})",
+                        cert.shortId(), targetNode, serviceName, summary, set.version());
             } else {
                 log.warn(
-                        "[Auth] Certificate {} for {} ({}) below threshold: {}/{} signatures, need {} (set v{}){}",
-                        cert.shortId(), targetNode, serviceName, got, vs.size(), set.threshold(), set.version(),
+                        "[Auth] Certificate {} for {} ({}) has no domain majority: {} (set v{}){}",
+                        cert.shortId(), targetNode, serviceName, summary, set.version(),
                         notes.isEmpty() ? "" : " — " + String.join("; ", notes));
             }
         } catch (Exception e) {
@@ -354,9 +378,13 @@ public final class AuthorizationService {
             return new Verdict(false, "validator set unavailable", 0, 0);
         }
         ValidatorSet set = setOpt.get();
-        int required = set.threshold();
+        // 門檻以「這個節點所屬網域」計算：該網域 Active Validator 的過半數。
+        // 斷線的 Validator 仍算在名單內（不能因為收不到回應就降低門檻）；計畫性離線請用 suspend。
+        String domain = targetDomain(set);
+        int required = domain != null ? set.domainMajority(domain) : set.threshold();
+        String scope = domain != null ? " in " + domain : "";
         if (required <= 0) {
-            return new Verdict(false, "no active validators on chain", 0, 0);
+            return new Verdict(false, "no active validators" + scope + " on chain", 0, 0);
         }
         String self = String.valueOf(HiBAInitial.nodeName);
         if (!self.equals(cert.targetNode)) {
@@ -387,6 +415,7 @@ public final class AuthorizationService {
         Set<String> counted = new HashSet<>();
         for (ValidatorSignature s : cert.signatures) {
             if (set.contains(s.validatorId())
+                    && (domain == null || domain.equals(set.domainOf(s.validatorId())))
                     && !counted.contains(s.validatorId())
                     && verifySignature(s.validatorId(), payload, s.signature())) {
                 counted.add(s.validatorId());
@@ -395,13 +424,29 @@ public final class AuthorizationService {
         int valid = counted.size();
         if (valid < required) {
             return new Verdict(
-                    false, "only " + valid + " valid validator signatures, need " + required, valid, required);
+                    false,
+                    "only " + valid + " valid validator signatures" + scope + ", need " + required,
+                    valid,
+                    required);
         }
         purge(usedNonces);
         if (usedNonces.putIfAbsent(cert.nonce, cert.expiresAt + CLOCK_SKEW_MS) != null) {
             return new Verdict(false, "certificate nonce already used (replay)", valid, required);
         }
-        return new Verdict(true, "ok (certificate " + cert.shortId() + ")", valid, required);
+        return new Verdict(true, "ok (certificate " + cert.shortId() + scope + ")", valid, required);
+    }
+
+    /**
+     * 這個節點所屬的網域：自己是 Validator 就用鏈上名單登記的網域，否則用 env.json 的 Authorization.domainId。
+     * 都沒有時回傳 null（退回全網門檻）。
+     */
+    String targetDomain(ValidatorSet set) {
+        String fromChain = set.domainOf(selfIdOrEmpty());
+        if (fromChain != null && !fromChain.isEmpty()) {
+            return fromChain;
+        }
+        String configured = config.getDomainId();
+        return configured == null || configured.isEmpty() ? null : configured;
     }
 
     // =====================================================================
