@@ -1,5 +1,7 @@
 package org.gslab.sdns;
 
+import org.gslab.security.SerialFilter;
+import org.gslab.security.TransferSecurityConfig;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -102,6 +104,8 @@ public class HiBAInitial {
     public static boolean start(SystemConfigurationLoader configLoader) {
         File serviceFile = new File("./env.json");
         boolean state = false;
+        // Java 反序列化白名單（8091、8088 都在驗證簽章前就反序列化），越早裝越好
+        SerialFilter.install(TransferSecurityConfig.get().deserializationFilter());
         sysName = System.getProperty("user.name");
 
         Map<String, Object> serviceTree = JsonFileUtil.ReadFile(serviceFile).toMap();

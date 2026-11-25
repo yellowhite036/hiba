@@ -20,6 +20,7 @@ import org.gslab.fileProtection.model.FileMetadata;
 import org.gslab.message_hiba.FileTransferClientHandler;
 import org.gslab.message_hiba.FileTransferFormat;
 import org.gslab.model.RequestId;
+import org.gslab.security.FileTransferAuth;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -93,6 +94,9 @@ public class FileTransferClient {
             if (metadata != null) {
                 transferFile.setMetadata(metadata);
             }
+
+            // 傳輸標頭（檔案大小、SHA-256）並用 TPM 簽章，接收端驗證傳送端是鏈上登記的設備
+            FileTransferAuth.sign(transferFile, file);
 
             logger.atInfo()
                     .addKeyValue("requestId", requestId)

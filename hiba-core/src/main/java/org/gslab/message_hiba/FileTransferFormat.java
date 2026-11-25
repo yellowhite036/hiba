@@ -19,7 +19,63 @@ public class FileTransferFormat implements Serializable {
     // Blockchain integration fields (TODO 8)
     private FileMetadata metadata; // 檔案metadata資訊
 
+    // 傳輸標頭（傳送端 TPM 簽章，見 org.gslab.security.FileTransferAuth）。舊版傳送端沒有這些欄位，收到時為預設值
+    private String transferId;
+    private String senderEk;
+    private long timestamp;
+    private long fileSize;
+    private String fileSha256;
+    private String signature;
+
     public FileTransferFormat() {}
+
+    public String getTransferId() {
+        return transferId;
+    }
+
+    public void setTransferId(String transferId) {
+        this.transferId = transferId;
+    }
+
+    public String getSenderEk() {
+        return senderEk;
+    }
+
+    public void setSenderEk(String senderEk) {
+        this.senderEk = senderEk;
+    }
+
+    public long getTimestamp() {
+        return timestamp;
+    }
+
+    public void setTimestamp(long timestamp) {
+        this.timestamp = timestamp;
+    }
+
+    public long getFileSize() {
+        return fileSize;
+    }
+
+    public void setFileSize(long fileSize) {
+        this.fileSize = fileSize;
+    }
+
+    public String getFileSha256() {
+        return fileSha256;
+    }
+
+    public void setFileSha256(String fileSha256) {
+        this.fileSha256 = fileSha256;
+    }
+
+    public String getSignature() {
+        return signature;
+    }
+
+    public void setSignature(String signature) {
+        this.signature = signature;
+    }
 
     public void setRequestId(RequestId requestId) {
         this.requestId = requestId;

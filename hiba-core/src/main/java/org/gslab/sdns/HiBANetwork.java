@@ -39,6 +39,7 @@ import java.util.function.Supplier;
 import org.gslab.App;
 import org.gslab.SdnNetwork;
 import org.gslab.authorization.AuthorizationService;
+import org.gslab.security.FileTransferAuth;
 import org.gslab.util.AESUtil;
 import org.gslab.util.CPUUsageRate;
 import org.gslab.util.JsonFileUtil;
@@ -226,6 +227,8 @@ public class HiBANetwork implements SdnNetwork {
         tpmDeviceRegistryService.warnIfAdminKeyAsync();
         // M1 多 Validator 授權（env.json Authorization.mode≠off 時才會啟用）
         AuthorizationService.init(tpmDeviceRegistryService);
+        // 檔案傳輸（8088）的傳送端簽章驗證用鏈上公鑰
+        FileTransferAuth.init(tpmDeviceRegistryService);
 
         clientBootstrap = new Bootstrap()
                 .group(clientWorker)
@@ -317,6 +320,7 @@ public class HiBANetwork implements SdnNetwork {
                 .cacheService(new PublicKeyCacheService(Path.of(LastKnownKeyStore.DEFAULT_FILE)))
                 .build();
         tpmDeviceRegistryService.warnIfAdminKeyAsync();
+        FileTransferAuth.init(tpmDeviceRegistryService);
 
         // 節點狀態頁（/nodes、/api/nodes）只在 accounting server 上啟用
         NodeStatusRegistry.get().enable(HiBAInitial.nodeName, tpmDeviceRegistryService);
