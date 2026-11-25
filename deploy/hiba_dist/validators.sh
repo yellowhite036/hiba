@@ -1,11 +1,16 @@
 #!/bin/bash
-# 管理 ValidatorRegistry（有授權簽章資格的設備名單，M1）。在 Pi 上執行。
+# 管理 ValidatorRegistry（授權簽章資格，M1）。在 Pi 上執行。
+# 平等制：TPMDeviceRegistry 裡 active 的設備自動就是 Validator，不用另外加入；這裡只做例外設定。
 #
-#   sudo bash /home/user/hiba_dist/validators.sh list
-#   sudo bash /home/user/hiba_dist/validators.sh add <EK> <網域ID> <IP:埠>     例：add 3f2a… domainA 192.168.1.173:8095
+#   sudo bash /home/user/hiba_dist/validators.sh list                        全部設備與有效狀態、各網域門檻
+#   sudo bash /home/user/hiba_dist/validators.sh add <EK> <網域ID> <IP:埠>     一次設定網域與位址（選用）
 #   sudo bash /home/user/hiba_dist/validators.sh suspend|resume|revoke <EK>   revoke 之後不能恢復
 #   sudo bash /home/user/hiba_dist/validators.sh endpoint <EK> <IP:埠>
+#   sudo bash /home/user/hiba_dist/validators.sh domain <EK> <網域ID>             改所屬網域（需 2026-11-25 後部署的合約）
 #   sudo bash /home/user/hiba_dist/validators.sh threshold <k>                0 = 自動 ceil(2n/3)
+#   sudo bash /home/user/hiba_dist/validators.sh default-domain <網域ID>      沒有另外設定網域的設備所屬的網域（預設 default）
+#   sudo bash /home/user/hiba_dist/validators.sh rep <EK> on|off              標記代表（代表制預留，節點程式尚未使用）
+#   sudo bash /home/user/hiba_dist/validators.sh rep-above <N>                網域超過 N 台且代表 >= 3 時用代表制；0 = 永遠平等制
 #   sudo bash /home/user/hiba_dist/validators.sh set-env <ValidatorRegistry 位址> [env.json ...]
 #        把 Authorization.validatorRegistry 寫進 env.json（預設 Pi 的 ~/HiBA/env.json 和
 #        ~/hiba_dist/template/env.json），沒有 mode 時設成 "log"。改完要重啟 HiBA
@@ -23,9 +28,9 @@ warn() { echo "  ⚠ $*"; }
 fail() { echo "  ✘ $*"; exit 1; }
 
 CMD="${1:-}"
-[ -n "$CMD" ] || { sed -n '2,16p' "$0"; exit 1; }
+[ -n "$CMD" ] || { sed -n '2,20p' "$0"; exit 1; }
 shift
-case "$CMD" in -h|--help) sed -n '2,16p' "$0"; exit 0 ;; esac
+case "$CMD" in -h|--help) sed -n '2,20p' "$0"; exit 0 ;; esac
 
 if [ "$CMD" = set-env ]; then
     VR="${1:-}"
@@ -74,21 +79,36 @@ FEE_OPTS=()
 
 call() { "$CAST" call "$VR" "$@" --rpc-url "$RPC"; }
 strip() { sed -e 's/^"//' -e 's/"$//'; }
-STATUS_NAME=(none Active Suspended Revoked)
+STATUS_NAME=(none Active Suspended Revoked 設備已撤銷)
 
 list() {
-    local n i ek
+    local n i dom st rep note d c
+    local -a row
     echo "  ValidatorRegistry $VR"
-    echo "  setVersion $(call "setVersion()(uint256)")，門檻設定 $(call "threshold()(uint256)")（0=自動），" \
-        "目前要求 $(call "requiredThreshold()(uint256)") / $(call "activeCount()(uint256)") 個 Active"
-    n="$(call "getValidatorCount()(uint256)")" || fail "查詢失敗（區塊鏈 $RPC 連不上？）"
+    echo "  setVersion $(call "setVersion()(uint256)")，預設網域 $(call "defaultDomain()(string)" 2>/dev/null | strip)，" \
+        "代表制 N=$(call "representativeAbove()(uint256)" 2>/dev/null || echo -)（0=永遠平等制）"
+    declare -A dcount=()
+    n="$(call "deviceCount()(uint256)" 2>/dev/null)" \
+        || fail "查詢失敗：區塊鏈 $RPC 連不上，或 $VR 是舊版合約（沒有 deviceCount）"
+    echo "  TPMDeviceRegistry 登記的設備 $n 台（active 且沒被暫停的自動是 Validator）："
     for ((i = 0; i < n; i++)); do
-        ek="$(call "getValidatorIdAt(uint256)(string)" "$i" | strip)"
-        mapfile -t v < <(call "getValidator(string)(string,string,uint8,uint64,uint64)" "$ek")
-        printf '  %-10s %-10s %-22s %s…\n' "${STATUS_NAME[${v[2]%% *}]}" "$(echo "${v[0]}" | strip)" \
-            "$(echo "${v[1]}" | strip)" "${ek:0:16}"
+        mapfile -t row < <(call "deviceAt(uint256)(string,string,uint8,bool,bool)" "$i")
+        dom="$(echo "${row[1]}" | strip)"
+        st="${row[2]%% *}"
+        rep=""
+        [ "${row[3]}" = true ] && rep="代表"
+        note="自動"
+        [ "${row[4]}" = true ] && note="有設定"
+        printf '  %-12s %-10s %-6s %-6s %s…\n' "${STATUS_NAME[$st]}" "$dom" "$note" "$rep" \
+            "$(echo "${row[0]}" | strip | cut -c1-16)"
+        [ "$st" = 1 ] && dcount[$dom]=$((${dcount[$dom]:-0} + 1))
     done
-    [ "$n" = 0 ] && echo "  （名單是空的）"
+    [ "$n" = 0 ] && echo "  （沒有登記的設備）"
+    for d in "${!dcount[@]}"; do
+        c=${dcount[$d]}
+        echo "  網域 $d：$c 台 Validator，需要 $((c / 2 + 1)) 台簽章"
+        [ "$c" -lt 3 ] && warn "網域 $d 不到 3 台：$( [ "$c" = 1 ] && echo "單一節點就能授權" || echo "任一台斷線，該網域的任務就停擺")"
+    done
 }
 
 if [ "$CMD" = list ]; then
@@ -103,6 +123,31 @@ ADDR="$("$CAST" wallet address --private-key "$KEY" 2>/dev/null)" || fail "管�
 [ "$(call "admins(address)(bool)" "$ADDR")" = true ] || fail "$ADDR 不是 ValidatorRegistry 的管理員"
 echo "  管理員 $ADDR"
 
+# 停用前檢查：停用後網域剩不到 3 台時說明後果並要求確認
+check_small_domain() {
+    local ek="$1" dom n i active=0 left a
+    local -a v row
+    mapfile -t v < <(call "getValidator(string)(string,string,uint8,uint64,uint64)" "$ek")
+    [ "${v[2]%% *}" = 1 ] || return 0
+    dom="$(echo "${v[0]}" | strip)"
+    n="$(call "deviceCount()(uint256)")" || return 0
+    for ((i = 0; i < n; i++)); do
+        mapfile -t row < <(call "deviceAt(uint256)(string,string,uint8,bool,bool)" "$i")
+        [ "${row[2]%% *}" = 1 ] && [ "$(echo "${row[1]}" | strip)" = "$dom" ] && active=$((active + 1))
+    done
+    left=$((active - 1))
+    [ "$left" -ge 3 ] && return 0
+    if [ "$left" -le 0 ]; then
+        warn "停用後網域 $dom 沒有 Validator，該網域節點的任務會退回全網門檻或被拒絕"
+    elif [ "$left" = 1 ]; then
+        warn "停用後網域 $dom 只剩 1 台 Validator，門檻 1/1：單一節點就能授權"
+    else
+        warn "停用後網域 $dom 只剩 2 台 Validator，門檻 2/2：任一台斷線就停擺"
+    fi
+    read -r -p "  確定要停用？(yes/no) " a
+    [ "$a" = yes ] || fail "已取消"
+}
+
 send() {
     "$CAST" send "$VR" "$@" --rpc-url "$RPC" --private-key "$KEY" "${FEE_OPTS[@]}" >/dev/null \
         || fail "交易失敗（訊息如上）"
@@ -114,16 +159,33 @@ case "$CMD" in
         [ "$("$CAST" call "$REGISTRY" "isDeviceActive(string)(bool)" "$1" --rpc-url "$RPC")" = true ] \
             || fail "這個 EK 在 TPMDeviceRegistry 不是 active 的設備（先用 register_node.sh 登記）"
         send "addValidator(string,string,string)" "$1" "$2" "$3"
-        ok "已加入 ${1:0:16}…（$2，$3）" ;;
-    suspend) [ $# = 1 ] || fail "用法：suspend <EK>"; send "suspendValidator(string)" "$1"; ok "已暫停 ${1:0:16}…" ;;
+        ok "${1:0:16}…：網域 $2，位址 $3" ;;
+    default-domain)
+        [ $# = 1 ] && [ -n "$1" ] || fail "用法：default-domain <網域ID>"
+        send "setDefaultDomain(string)" "$1"; ok "預設網域改為 $1" ;;
+    suspend)
+        [ $# = 1 ] || fail "用法：suspend <EK>"
+        check_small_domain "$1"
+        send "suspendValidator(string)" "$1"; ok "已暫停 ${1:0:16}…" ;;
     resume)  [ $# = 1 ] || fail "用法：resume <EK>";  send "resumeValidator(string)" "$1";  ok "已恢復 ${1:0:16}…" ;;
     revoke)
         [ $# = 1 ] || fail "用法：revoke <EK>"
+        check_small_domain "$1"
         read -r -p "  revoke 之後不能恢復，確定？(yes/no) " a
         [ "$a" = yes ] || fail "已取消"
         send "revokeValidator(string)" "$1"; ok "已撤銷 ${1:0:16}…" ;;
     endpoint) [ $# = 2 ] || fail "用法：endpoint <EK> <IP:埠>"; send "setEndpoint(string,string)" "$1" "$2"; ok "已更新" ;;
+    domain)
+        [ $# = 2 ] && [ -n "$2" ] || fail "用法：domain <EK> <網域ID>"
+        send "setDomain(string,string)" "$1" "$2"; ok "${1:0:16}… 改為 $2" ;;
     threshold) [[ "${1:-}" =~ ^[0-9]+$ ]] || fail "用法：threshold <k>"; send "setThreshold(uint256)" "$1"; ok "門檻設定為 $1" ;;
+    rep)
+        [ $# = 2 ] && [[ "$2" =~ ^(on|off)$ ]] || fail "用法：rep <EK> on|off"
+        send "setRepresentative(string,bool)" "$1" "$([ "$2" = on ] && echo true || echo false)"
+        ok "${1:0:16}… 代表：$2" ;;
+    rep-above)
+        [[ "${1:-}" =~ ^[0-9]+$ ]] || fail "用法：rep-above <N>"
+        send "setRepresentativeAbove(uint256)" "$1"; ok "代表制門檻 N=$1（0=永遠平等制）" ;;
     *) fail "不認得的指令：$CMD（-h 看用法）" ;;
 esac
 echo

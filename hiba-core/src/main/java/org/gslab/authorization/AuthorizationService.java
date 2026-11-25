@@ -18,6 +18,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 import lombok.extern.slf4j.Slf4j;
 import org.gslab.authorization.AuthorizationCertificate.ValidatorSignature;
 import org.gslab.authorization.ValidatorRegistryClient.Validator;
@@ -55,6 +56,10 @@ public final class AuthorizationService {
     /** validator 端簽過的憑證 nonce → 到期時間 */
     private final Map<String, Long> signedNonces = new ConcurrentHashMap<>();
     private ValidatorSignServer server;
+    /** 上層 broker 的 EK（非 Validator 節點用來自動決定網域）；測試可替換 */
+    Supplier<String> upperBrokerEk = () -> SignRelay.get().upperBrokerEk();
+    /** 上次決定的網域與來源（變動時記 log 一次） */
+    private volatile String lastDomainNote = "";
 
     public record Verdict(boolean ok, String reason, int validSignatures, int required) {}
 
@@ -437,16 +442,45 @@ public final class AuthorizationService {
     }
 
     /**
-     * 這個節點所屬的網域：自己是 Validator 就用鏈上名單登記的網域，否則用 env.json 的 Authorization.domainId。
+     * 這個節點所屬的網域，依序：
+     * <ol>
+     * <li>自己是 Validator：鏈上名單登記的網域</li>
+     * <li>不是 Validator：上層 broker 的網域（自動；上層的 EK 由連線的 TPM 簽章得知，網域查鏈上名單）</li>
+     * <li>env.json 的 Authorization.domainId（手動指定，只在上面兩種都查不到時使用）</li>
+     * </ol>
      * 都沒有時回傳 null（退回全網門檻）。
      */
     String targetDomain(ValidatorSet set) {
-        String fromChain = set.domainOf(selfIdOrEmpty());
-        if (fromChain != null && !fromChain.isEmpty()) {
-            return fromChain;
+        String domain = set.domainOf(selfIdOrEmpty());
+        String source = "own validator entry";
+        if (isEmpty(domain)) {
+            String upper = null;
+            try {
+                upper = upperBrokerEk.get();
+            } catch (RuntimeException e) {
+                log.debug("[Auth] Cannot read upper broker EK: {}", e.getMessage());
+            }
+            domain = set.domainOf(upper);
+            source = "upper broker " + (upper == null ? "" : upper.substring(0, Math.min(16, upper.length())) + "…");
         }
-        String configured = config.getDomainId();
-        return configured == null || configured.isEmpty() ? null : configured;
+        if (isEmpty(domain)) {
+            domain = config.getDomainId();
+            source = "env.json Authorization.domainId";
+        }
+        if (isEmpty(domain)) {
+            domain = null;
+            source = "none, using global threshold";
+        }
+        String note = domain + " (" + source + ")";
+        if (!note.equals(lastDomainNote)) {
+            lastDomainNote = note;
+            log.info("[Auth] This node's domain: {}", note);
+        }
+        return domain;
+    }
+
+    private static boolean isEmpty(String s) {
+        return s == null || s.isEmpty();
     }
 
     // =====================================================================

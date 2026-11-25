@@ -86,6 +86,7 @@ class AuthorizationServiceTest {
         setValidatorSet(4, 2, "V1", "V2", "V3");
 
         service = new AuthorizationService(config("enforce", List.of()), chain, registry);
+        service.upperBrokerEk = () -> null; // 預設沒有上層 broker
     }
 
     @AfterEach
@@ -321,6 +322,58 @@ class AuthorizationServiceTest {
         attach(task, cert(task, 9), "V1", "V2", "V3");
 
         assertRejected(service.verify(task), "only 3 valid validator signatures, need 4");
+    }
+
+    @Test
+    @DisplayName("網域：不是 Validator 的節點自動沿用上層 broker 的網域（上層是 V4 → domainB）")
+    void nonValidatorInheritsUpperBrokerDomain() throws Exception {
+        twoDomains();
+        service.upperBrokerEk = () -> "V4";
+        Map<String, Object> task = task();
+        attach(task, cert(task, 9), "V4", "V5");
+        AuthorizationService.Verdict v = service.verify(task);
+        assertThat(v.ok()).as(v.reason()).isTrue();
+        assertThat(v.reason()).contains("domainB");
+
+        Map<String, Object> task2 = task();
+        attach(task2, cert(task2, 9), "V1", "V2", "V3");
+        assertRejected(service.verify(task2), "in domainB, need 2");
+    }
+
+    @Test
+    @DisplayName("網域：上層 broker 的網域優先於 env.json；上層不是 Validator 時才用 env.json")
+    void upperBrokerDomainOverridesConfig() throws Exception {
+        twoDomains();
+        AuthorizationService s = new AuthorizationService(config("enforce", List.of(), "domainB"), chain, registry);
+        s.upperBrokerEk = () -> "V1";
+        Map<String, Object> task = task();
+        attach(task, cert(task, 9), "V1", "V2");
+        AuthorizationService.Verdict v = s.verify(task);
+        assertThat(v.ok()).as(v.reason()).isTrue();
+        assertThat(v.reason()).contains("domainA");
+
+        s.upperBrokerEk = () -> "X"; // 上層是登記過的設備，但不是 Validator
+        Map<String, Object> task2 = task();
+        attach(task2, cert(task2, 9), "V4", "V5");
+        AuthorizationService.Verdict v2 = s.verify(task2);
+        assertThat(v2.ok()).as(v2.reason()).isTrue();
+        assertThat(v2.reason()).contains("domainB");
+    }
+
+    @Test
+    @DisplayName("網域：4 台的網域（173、141、205、11）需要 3 台；2 台簽 → 拒絕")
+    void fourValidatorDomainNeedsThree() throws Exception {
+        setValidatorSet(10, 0, "V1", "V2", "V3", "V4");
+        actAsValidator("V1");
+        Map<String, Object> task = task();
+        attach(task, cert(task, 10), "V1", "V2");
+        assertRejected(service.verify(task), "only 2 valid validator signatures in domainA, need 3");
+
+        Map<String, Object> task2 = task();
+        attach(task2, cert(task2, 10), "V1", "V2", "V4");
+        AuthorizationService.Verdict v = service.verify(task2);
+        assertThat(v.ok()).as(v.reason()).isTrue();
+        assertThat(v.required()).isEqualTo(3);
     }
 
     // =====================================================================

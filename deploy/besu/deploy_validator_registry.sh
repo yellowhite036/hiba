@@ -93,6 +93,6 @@ cat <<EOF
   1. 各節點 ~/HiBA/env.json 加上（Pi 的 ~/HiBA/env.json 和 ~/hiba_dist/template/env.json 也加，方便之後的新節點）：
        "Authorization": { "mode": "log", "validatorRegistry": "$VR" }
      或在 Pi 上：sudo bash ~/hiba_dist/validators.sh set-env $VR
-  2. 加入 Validator：sudo bash ~/hiba_dist/validators.sh add <EK> <網域> <IP>:8095
-  3. 查看名單：      bash ~/hiba_dist/validators.sh list
+  2. 不用另外加入 Validator：TPMDeviceRegistry 裡 active 的設備自動是 Validator（目前 $(cast call "$VR" "activeCount()(uint256)" --rpc-url "$RPC") 台）
+  3. 查看名單：sudo bash ~/hiba_dist/validators.sh list（不再使用的設備要先在 TPMDeviceRegistry 撤銷，或用 validators.sh suspend）
 EOF

@@ -17,6 +17,7 @@ import java.util.concurrent.TimeoutException;
 import lombok.extern.slf4j.Slf4j;
 import org.gslab.SdnNetwork;
 import org.gslab.authorization.AuthorizationCertificate.ValidatorSignature;
+import org.gslab.handlers.MessageTPMVerifyHandler;
 import org.gslab.message_hiba.AuthSignRequest;
 import org.gslab.message_hiba.AuthSignResponse;
 import org.gslab.sdns.HiBAInitial;
@@ -74,6 +75,16 @@ public final class SignRelay {
     /** App 建立時設定（取得相鄰連線用） */
     public void setNetwork(SdnNetwork network) {
         this.network = network;
+    }
+
+    /**
+     * 上層 broker 的 EK 指紋：連線上第一則通過 TPM 簽章驗證的訊息之後才有（沒有上層、或還沒收到過時為 null）。
+     * BLOCKCHAIN_STRICT 模式下這個 EK 已用鏈上公鑰驗證過，非 Validator 節點用它自動決定自己的網域。
+     */
+    public String upperBrokerEk() {
+        SdnNetwork net = network;
+        Channel ch = net == null ? null : net.getBrokerChannel();
+        return ch == null ? null : ch.attr(MessageTPMVerifyHandler.PEER_EK_FINGERPRINT).get();
     }
 
     /** 發起者：收集整個 HiBA 網路中 Validator 的簽章（不驗證，由呼叫者驗證） */

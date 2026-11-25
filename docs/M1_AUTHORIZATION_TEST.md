@@ -38,7 +38,9 @@
 
 **門檻（D1 起）**：以執行任務節點所屬網域計算，需要該網域 Active Validator 的過半數 `floor(n/2)+1`；
 其他網域的簽章不計入。斷線的 Validator 仍算在 n 內（不因收不到回應而降低門檻），計畫性停機請用 `validators.sh suspend`／`resume`。
-節點的網域：是 Validator 時以鏈上名單為準，否則用 env.json 的 `Authorization.domainId`；兩者都沒有時退回鏈上全網門檻（`setThreshold`，0＝ceil(2n/3)）。
+節點的網域（D2 起）：是 Validator 時以鏈上名單為準；不是時自動沿用上層 broker 的網域（上層 EK 由連線的 TPM 簽章得知）；都查不到才用 env.json 的 `Authorization.domainId`，最後退回鏈上全網門檻（`setThreshold`，0＝ceil(2n/3)）。
+
+**誰是 Validator（D2 起，平等制）**：TPMDeviceRegistry 裡 active 的設備自動是 Validator，不需要另外登記；ValidatorRegistry 只記錄例外（網域、暫停／撤銷、位址、代表標記）。沒有設定網域的設備屬於 `defaultDomain`（預設 `default`）。代表制欄位（`representative`、`representativeAbove`）已預留在合約，節點程式尚未使用。
 
 `Authorization.mode`：`off`（預設，完全不啟用）／`log`（只記錄，任務照常執行）／`enforce`（驗證不過就不執行）。
 
@@ -233,7 +235,17 @@ D1（網域過半數）新增 6 項，名單模擬 v9：V1–V3 domainA、V4–V
 | 執行節點（非 Validator） | env.json `domainId = domainB` | 以 domainB 的過半數計算 |
 | 執行節點（非 Validator） | 不知道網域 | 退回全網門檻 4 |
 
-**結果：共 27 項，`Tests run: 27, Failures: 0, Errors: 0`（待在 Pi 上執行確認）。**
+**結果：共 27 項。**
+
+D2（自動網域）新增 3 項：
+
+| 對象 | 情境 | 預期 |
+|---|---|---|
+| 執行節點（非 Validator） | 上層 broker 是 domainB 的 Validator | 以 domainB 的過半數計算 |
+| 執行節點（非 Validator） | 上層是 domainA 的 Validator、env.json 寫 domainB | 用上層的 domainA；上層不是 Validator 時才用 env.json |
+| 執行節點 | 4 台的網域 | 需要 3 台；2 台簽 → 拒絕 |
+
+**結果：`Tests run: 30, Failures: 0, Errors: 0`（2026-11-25，Pi）— 通過。**
 
 ### R1 Netty 轉送收集簽章（2026-11-23，jar `e32744bd`）
 
@@ -265,6 +277,22 @@ HiBA 的連線一律由下層主動連上層，所以簽章請求改為沿既有
 | D1-2 | 停止 11、12 的 `hiba.service`（網域 B 整個斷線），再送一次 | 173：`Certificate f72da38f for NewNode-141 (getFile): domainA 3/3 (need 2), domainB 0/2 (need 2) (set v8)`；141：`Task authorized: 3 valid validator signatures (need 2), ok (certificate f72da38f in domainA)`；任務成功（舊規則 3/5 < 4 會被拒） |
 
 **結果：通過。** 一個網域斷線不影響其他網域；網域 B 的 n 仍為 2（斷線不降低門檻）。
+
+### D2 平等制：已登記設備自動成為 Validator（2026-11-25）
+
+重新部署 ValidatorRegistry `0xe1F323A617E18fcf34f29550ed85e0c3E1877063`（舊的 `0x2D03…` 不再使用），沒有執行任何 `add`。
+部署後 `validators.sh list` 列出 TPMDeviceRegistry 的 6 台 active 設備，全部自動是 Validator（網域 `default`，門檻 4/6）。
+第 6 台 `1C24F3B4…` 是 accounting server（Pi，軟體 TPM），不在轉送簽章的連線網路中、永遠不會簽章，
+而且持有管理員私鑰，所以用 `validators.sh suspend` 排除（setVersion 2，5 台，門檻 3/5）。5 台節點的 env.json 改用新位址後重啟。
+
+| # | 情境 | 結果 |
+|---|---|---|
+| D2-1 | 5 台剛重啟完立即送 getFile（11、12 尚未連回 173） | 173：`Certificate e937843d … default 3/5 (need 3) (set v2)`；12 的 log 沒有收到簽章請求；任務成功 |
+| D2-2 | 停止 11、12 | 任務成功（3/5，門檻 3） |
+| D2-3 | 11、12 重新啟動約 1 分鐘後 | 173：`Certificate d0106ecb for NewNode-141 (getFile): default 5/5 (need 3) (set v2)`；任務成功 |
+
+**結果：通過。** 不需要登記 Validator；不參與的設備用 suspend 排除。節點重啟後約 1 分鐘才會重新連上並參與簽章。
+「非 Validator 自動沿用上層網域」這次 5 台都是 Validator，實機沒有測到，只有單元測試涵蓋。
 
 ## 5. 尚未測試
 
